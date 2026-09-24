@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | JB Call Center{% endblock %}
+{% block page_heading %}Dashboard{% endblock %}
+{% block page_title %}System Overview{% endblock %}
+{% block page_sub %}Welcome to the JB Call Center enterprise portal.{% endblock %}
+
+{% block content %}
+<div class="tiles">
+  <div class="tile info">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ request.session.JB_RoleName|default:"Standard User" }}</div>
+      <div class="tile-label">Assigned Role</div>
+    </div>
+  </div>
+
+  <div class="tile ok">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ request.session.JB_UserID }}</div>
+      <div class="tile-label">User ID</div>
+    </div>
+  </div>
+
+  <div class="tile warn">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">Secure</div>
+      <div class="tile-label">Session &middot; Encrypted</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Welcome to the JB Call Center Portal</div>
+      <div class="panel-sub">Role-based access with a full security audit trail</div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <p class="muted" style="margin-bottom:.4rem;">
+      Select an option from the sidebar menu on the left to navigate through your permitted features.
+    </p>
+    <p class="muted" style="font-size:.82rem;">
+      All actions performed on this portal are recorded in the system audit trail for compliance and monitoring.
+    </p>
+  </div>
+</div>
+{% endblock %}

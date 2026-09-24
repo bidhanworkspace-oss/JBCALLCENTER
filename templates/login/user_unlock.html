@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}User Unlock | JB Call Center{% endblock %}
+{% block page_heading %}User Unlock{% endblock %}
+{% block page_title %}Manage User by Mobile{% endblock %}
+{% block page_sub %}Search a customer by mobile number and update the account status.{% endblock %}
+
+{% block content %}
+<style>
+  .unlock-search { display: flex; gap: .6rem; align-items: flex-start; flex-wrap: wrap; }
+  .unlock-search .form-group { flex: 1; min-width: 260px; margin-bottom: 0; }
+  .result-muted { padding: .9rem .4rem; color: var(--muted); font-size: .85rem; }
+  .status-form .form-row { display: flex; gap: .7rem; flex-wrap: wrap; align-items: flex-end; }
+  .status-form .form-row .form-group { flex: 1; min-width: 160px; margin-bottom: 0; }
+  .alert-msg { padding: .75rem .9rem; border-radius: 10px; font-size: .85rem; line-height: 1.45; margin: .9rem 0 .2rem; }
+  .alert-msg.ok { background: #e7f3e9; border: 1px solid #c3e4cb; color: #14603e; }
+  .alert-msg.err { background: #fdeeea; border: 1px solid #f5c6bd; color: #a33a2f; }
+</style>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Find User by Mobile</div>
+      <div class="panel-sub">Enter the customer's registered mobile number (e.g. 01712345678)</div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <form method="get" action="{% url 'user_unlock' %}" class="unlock-search" autocomplete="off">
+      <div class="form-group">
+        <label for="unlock_mobile">Mobile Number</label>
+        <input type="text" class="form-control" id="unlock_mobile" name="mobileno"
+               value="{{ mobileno|default:'' }}"
+               placeholder="e.g. 01712345678" inputmode="numeric" spellcheck="false" required>
+      </div>
+      <div style="min-width:200px;">
+        <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.4rem; visibility:hidden;">&nbsp;</label>
+        <button type="submit" class="btn btn-primary" id="unlockSearchBtn" style="width:100%;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Search
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if errormsg %}
+<div class="alert-msg {% if errormsg == 'Update Done Successfully.' %}ok{% else %}err{% endif %}">{{ errormsg }}</div>
+{% endif %}
+
+{% if mobileno %}
+{% if infos %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Matching Accounts</div>
+      <div class="panel-sub">Choose a status and press Update to apply the change.</div>
+    </div>
+    <span class="badge badge-warn">{{ infos|length }} found</span>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>User Info ID</th>
+            <th>User ID</th>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Current Status</th>
+            <th>Lock Count</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in infos %}
+          <tr>
+            <td class="strong code">{{ u.appuserinfoid|default:'-' }}</td>
+            <td class="strong code">{{ u.userid|default:'-' }}</td>
+            <td>{{ u.fullname|default:'-' }}</td>
+            <td class="num">{{ u.mobile|default:'-' }}</td>
+            <td class="muted">{{ u.email|default:'-' }}</td>
+            <td><span class="badge badge-info">{{ u.role_name|default:'No Role' }}</span></td>
+            <td><span class="badge {% if u.status and u.status|lower != 'enabled' %}badge-danger{% else %}badge-good{% endif %}">{{ u.status|default:'-' }}</span></td>
+            <td><span class="num">{{ u.failed_attempts|default:0 }}</span></td>
+            <td>
+              <details class="status-form" {% if forloop.first %}open{% endif %}>
+                <summary>Update Status</summary>
+                <form method="post" action="{% url 'user_unlock' %}" style="display:grid; gap:.75rem; margin-top:.7rem;">
+                  {% csrf_token %}
+                  <input type="hidden" name="mobileno" value="{{ mobileno }}">
+                  <input type="hidden" name="txtappuserinfoid" value="{{ u.appuserinfoid|default:'' }}">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="txtlockCount_{{ forloop.counter }}">Lock Count</label>
+                      <input type="text" class="form-control" id="txtlockCount_{{ forloop.counter }}"
+                             name="txtlockCount" value="{{ u.failed_attempts|default:0 }}">
+                    </div>
+                    <div class="form-group">
+                      <label for="sltappUserStatus_{{ forloop.counter }}">Status</label>
+                      <select class="form-control" id="sltappUserStatus_{{ forloop.counter }}" name="sltappUserStatus">
+                        {% for st in userstatuslists %}
+{% if actor_role|lower == 'manager' and u.role_name|lower == 'superadmin' and st.statusname|lower == 'disabled' or actor_role|lower == 'manager' and u.role_name|lower == 'superadmin' and st.statusname|lower == 'locked' %}
+<option value="{{ st.statusname|default:st }}" disabled title="Managers cannot disable or lock a Superadmin account. Only a Superadmin can.">
+  {{ st.statusname|default:st }} (not allowed)
+</option>
+{% else %}
+                        <option value="{{ st.statusname|default:st }}"
+                                {% if st.statusname|default:st == u.status|default:'' %}selected{% endif %}>
+                          {{ st.statusname|default:st }}
+                        </option>
+                        {% endif %}
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="txtremarks_{{ forloop.counter }}">Remarks</label>
+                      <input type="text" class="form-control" id="txtremarks_{{ forloop.counter }}"
+                             name="txtremarks" placeholder="Reason for status change">
+                    </div>
+                    <div style="min-width:200px;">
+                      <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.4rem; visibility:hidden;">&nbsp;</label>
+                      <button type="submit" class="btn btn-warning" name="btnupdateuser" value="1" style="width:100%;">
+                        Update Status
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </details>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="panel">
+  <div class="panel-body">
+    <p class="result-muted">No user found with mobile number <strong>{{ mobileno }}</strong>.</p>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
+<script>
+  (function () {
+    var mobileIn = document.getElementById('unlock_mobile');
+    mobileIn.addEventListener('input', function () {
+      mobileIn.value = mobileIn.value.replace(/[^0-9]/g, '').slice(0, 15);
+    });
+  })();
+</script>
+{% endblock %}

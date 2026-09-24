@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Registrations | JB Call Center{% endblock %}
+{% block page_heading %}Pending Registrations{% endblock %}
+{% block page_title %}User Approval Queue{% endblock %}
+{% block page_sub %}Review and approve new user registration requests.{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Pending User Registrations</div>
+      <div class="panel-sub">{{ pending_users|length }} registration(s) awaiting action</div>
+    </div>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Reg ID</th>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>NID</th>
+            <th>Attachment</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for reg in pending_users %}
+          <tr>
+            <td class="num muted">{{ reg.registration_id }}</td>
+            <td class="strong">{{ reg.fullname }}</td>
+            <td class="num">{{ reg.mobile }}</td>
+            <td>{{ reg.email }}</td>
+            <td class="num muted">{{ reg.nid }}</td>
+            <td>
+              {% if reg.attachment_path %}
+                <a class="btn btn-ghost btn-sm" href="{{ reg.attachment_path }}" target="_blank">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 8l4-5 4 5"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+                  View
+                </a>
+              {% else %}
+                <span class="muted">None</span>
+              {% endif %}
+            </td>
+            <td>
+              <a class="btn btn-success btn-sm" href="{% url 'approve_user' reg.registration_id %}" onclick="return confirm('Approve this user?');">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+                Approve
+              </a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="empty">No pending registrations found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

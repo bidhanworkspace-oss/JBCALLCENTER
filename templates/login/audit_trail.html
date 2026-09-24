@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Trail | JB Call Center{% endblock %}
+{% block page_heading %}Audit Trail{% endblock %}
+{% block page_title %}System Activity & API Audit Logs{% endblock %}
+{% block page_sub %}Recorded actions and API activity across the portal.{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Recorded Actions & API Logs</div>
+      <div class="panel-sub">{{ audit_logs|length }} log entr{{ audit_logs|length|pluralize:"y, ies" }}</div>
+    </div>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap" style="max-height:600px; overflow-y:auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Log ID</th>
+            <th>Timestamp</th>
+            <th>User ID</th>
+            <th>Role</th>
+            <th>Action / Method</th>
+            <th>URL Endpoint</th>
+            <th>IP Address</th>
+            <th>HTTP Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in audit_logs %}
+          <tr>
+            <td class="num muted">{{ log.log_id }}</td>
+            <td class="num">{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+            <td class="strong">{{ log.user_id|default:"ANONYMOUS" }}</td>
+            <td><span class="badge badge-info">{{ log.role_name|default:"GUEST" }}</span></td>
+            <td><span class="code">{{ log.action_type }}</span></td>
+            <td class="muted">{{ log.url_path }}</td>
+            <td class="num">{{ log.ip_address }}</td>
+            <td>
+              {% if log.response_status == 200 %}
+                <span class="badge badge-good">200 OK</span>
+              {% elif log.response_status == 403 %}
+                <span class="badge badge-danger">403 Forbidden</span>
+              {% else %}
+                <span class="badge badge-warn">{{ log.response_status }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="empty">No audit logs available.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

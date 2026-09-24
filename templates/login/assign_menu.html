@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Assign Menu | JB Call Center{% endblock %}
+{% block page_heading %}Assign Menu{% endblock %}
+{% block page_title %}Admin Panel / Menu Assignment{% endblock %}
+{% block page_sub %}Drag a menu from the tray onto a user to assign it, or click the (×) on a menu chip to remove it.{% endblock %}
+
+{% block content %}
+<style>
+  .assign-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1.4rem; align-items: start; }
+  @media (max-width: 1024px) { .assign-layout { grid-template-columns: 1fr; } }
+
+  /* ===== menu tray ===== */
+  .tray { position: sticky; top: 84px; }
+  .menu-chip {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .65rem .8rem; margin-bottom: .6rem;
+    border-radius: 11px; background: #fbfdfe;
+    border: 1.5px solid var(--line); cursor: grab;
+    transition: transform .15s, box-shadow .18s, border-color .18s, opacity .18s;
+    user-select: none;
+  }
+  .menu-chip:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+  .menu-chip.dragging { opacity: .45; border-style: dashed; border-color: var(--sky-500); }
+  .menu-chip .mc-name { font-weight: 700; font-size: .85rem; color: var(--sky-900); flex: 1; min-width: 0; }
+  .menu-chip .mc-url { font-size: .69rem; color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-chip .mc-dot {
+    flex: none; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--sky-500); opacity: .85;
+    box-shadow: 0 0 0 3px rgba(43,159,224,.14);
+  }
+  .menu-chip.droppable-over { border-color: var(--sky-500); box-shadow: 0 0 0 3px rgba(43,159,224,.14); }
+
+  /* ===== search ===== */
+  .search-box { margin-bottom: 1rem; }
+  .search-box input {
+    width: 100%; padding: .7rem .9rem; border: 1.5px solid var(--line);
+    border-radius: 12px; background: #fff; font-size: .9rem; font-family: inherit;
+    outline: none; transition: border-color .2s, box-shadow .2s;
+  }
+  .search-box input:focus { border-color: var(--sky-500); box-shadow: 0 0 0 4px rgba(43,159,224,.14); }
+
+  /* ===== user cards ===== */
+  .user-cards { display: grid; gap: .9rem; }
+  .user-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-sm); overflow: hidden;
+    transition: border-color .16s, box-shadow .2s;
+  }
+  .user-card.droppable-over { border-color: var(--sky-500); box-shadow: 0 0 0 3px rgba(43,159,224,.14); }
+  .uc-head {
+    display: flex; align-items: center; gap: .7rem;
+    padding: .8rem 1rem; background: #fbfdfe; border-bottom: 1px solid var(--line);
+  }
+  .uc-avatar {
+    flex: none; width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--sky-600), var(--sky-500));
+    color: #fff; display: grid; place-items: center; font-weight: 700; font-size: .85rem;
+  }
+  .uc-body { min-width: 0; flex: 1; }
+  .uc-name { font-weight: 700; font-size: .85rem; color: var(--sky-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .uc-meta { font-size: .73rem; color: var(--muted); display: flex; gap: .5rem; flex-wrap: wrap; }
+  .uc-meta .code { font-size: .68rem; }
+  .uc-actions { display: flex; align-items: center; gap: .4rem; flex: none; }
+
+  .uc-menus {
+    display: flex; flex-wrap: wrap; gap: .45rem;
+    padding: .7rem 1rem; min-height: 46px;
+    align-items: center;
+  }
+  .uc-menus-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-right: .15rem; }
+
+  .acc-chip {
+    display: inline-flex; align-items: center; gap: .35rem;
+    padding: .28rem .55rem .28rem .7rem; border-radius: 999px;
+    background: #eef6fb; border: 1px solid #d6e9f3; color: var(--sky-900);
+    font-size: .74rem; font-weight: 700; user-select: none;
+  }
+  .acc-chip .remove-x {
+    display: grid; place-items: center;
+    width: 17px; height: 17px; border-radius: 50%;
+    border: none; background: transparent; color: var(--danger);
+    cursor: pointer; line-height: 1; font-size: .95rem; padding: 0;
+  }
+  .acc-chip .remove-x:hover { background: #fdeeea; }
+
+  .drop-hint { font-size: .72rem; color: var(--muted); font-weight: 600; }
+  .board-empty { padding: 1.2rem 1rem; text-align: center; color: var(--muted); font-size: .82rem; }
+
+  /* ===== Bank Support toggle ===== */
+  .bs-btn {
+    display: inline-flex; align-items: center; gap: .35rem;
+    padding: .34rem .7rem; border-radius: 9px; border: 1px solid var(--line);
+    background: #fff; color: var(--sky-700); font-size: .74rem; font-weight: 700; cursor: pointer;
+    transition: background .15s, transform .15s; font-family: inherit;
+  }
+  .bs-btn:hover { transform: translateY(-1px); background: #eef6fb; }
+  .bs-btn.on { background: #fdf3dc; border-color: #ecdfae; color: #8a5b08; }
+  .bs-badge { font-size: .68rem; font-weight: 700; }
+
+  /* ===== toast ===== */
+  #assignToast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 90;
+    max-width: 360px; padding: .85rem 1rem; border-radius: 12px;
+    box-shadow: var(--shadow); font-size: .85rem; font-weight: 600;
+    opacity: 0; transform: translateY(12px); pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  #assignToast.show { opacity: 1; transform: none; }
+  #assignToast.ok { background: #e7f3e9; border: 1px solid #c3e4cb; color: #14603e; }
+  #assignToast.err { background: #fdeeea; border: 1px solid #f5c6bd; color: #a33a2f; }
+
+  .hint { font-size: .76rem; color: var(--muted); margin-top: .5rem; }
+</style>
+
+<div class="assign-layout">
+
+  <!-- LEFT: assignable menu tray -->
+  <aside class="tray">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Menus You Can Assign</div>
+          <div class="panel-sub">These are the menus assigned to you.</div>
+        </div>
+        <span class="badge badge-info">{{ assignable_menus|length }}</span>
+      </div>
+      <div class="panel-body">
+        <div id="menuTray">
+          {% for m in assignable_menus %}
+          <div class="menu-chip" draggable="true" data-menu-id="{{ m.menu_id }}" data-menu-title="{{ m.title }}">
+            <span class="mc-dot"></span>
+            <div style="min-width:0;">
+              <div class="mc-name">{{ m.title }}</div>
+            </div>
+          </div>
+          {% empty %}
+          <div class="board-empty">No menus assigned to you.</div>
+          {% endfor %}
+        </div>
+        <div class="hint">Drag a menu chip onto a user card to assign it.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- RIGHT: users -->
+  <section>
+    <div class="search-box">
+      <input type="search" id="userSearch" placeholder="Search users by name, user ID or email...">
+    </div>
+
+    <div class="user-cards" id="userCards">
+      {% for u in users %}
+      <div class="user-card" data-user-id="{{ u.user_id }}"
+           data-fullname="{{ u.fullname }}" data-email="{{ u.email }}">
+        <div class="uc-head">
+          <div class="uc-avatar">{{ u.fullname|slice:":1"|upper }}</div>
+          <div class="uc-body">
+            <div class="uc-name">{{ u.fullname }}</div>
+            <div class="uc-meta">
+              <span class="code">{{ u.user_id }}</span>
+              {% if u.status == 'Enabled' %}<span class="badge badge-good">Enabled</span>{% else %}<span class="badge badge-danger">{{ u.status }}</span>{% endif %}
+              {% if u.role_name == 'Bank Support' %}
+                <span class="bs-badge"><span class="badge badge-warn">Bank Support</span></span>
+              {% else %}
+                <span class="badge badge-info">{{ u.role_name }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="uc-actions">
+            {% if actor_role == 'Superadmin' and u.role_name == 'Bank Support' %}
+              <button type="button" class="bs-btn on" data-action="unset_support" title="Remove Bank Support role">
+                Remove Bank Support
+              </button>
+            {% elif actor_role == 'Superadmin' and u.role_name == 'User' %}
+              <button type="button" class="bs-btn" data-action="set_support" title="Make this user Bank Support">
+                Make Bank Support
+              </button>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="uc-menus">
+          <span class="uc-menus-label">Menus</span>
+          {% for a in u.assigned_menus %}
+          <span class="acc-chip" data-menu-id="{{ a.menu_id }}" data-menu-title="{{ a.title }}">
+            {{ a.title }}
+            <button type="button" class="remove-x" title="Remove {{ a.title }}" aria-label="Remove {{ a.title }}">&times;</button>
+          </span>
+          {% empty %}
+          <span class="drop-hint">No menus assigned - drag a menu here</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% empty %}
+      <div class="panel">
+        <div class="panel-body"><p class="empty">No users available to manage with your permissions.</p></div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<div id="assignToast"></div>
+
+<form class="csrf-holder" hidden>{% csrf_token %}</form>
+
+<script>
+  (function () {
+    var toast = document.getElementById('assignToast');
+
+    function showToast(text, ok) {
+      toast.textContent = text;
+      toast.className = (ok ? 'ok' : 'err') + ' show';
+      setTimeout(function () { toast.className = ''; }, 2600);
+    }
+
+    function getCSRF() {
+      var el = document.querySelector('input[name="csrfmiddlewaretoken"]');
+      if (el) return el.value;
+      var m = document.cookie.match(/csrftoken=([^;]+)/);
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+
+    function post(extra, label) {
+      var body = new URLSearchParams();
+      Object.keys(extra).forEach(function (k) { body.append(k, extra[k]); });
+      body.append('csrfmiddlewaretoken', getCSRF());
+
+      showToast(label, true);
+
+      fetch('{% url "assign_menu" %}', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRFToken': getCSRF()
+        },
+        body: body
+      })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          if (data.success) {
+            showToast(data.message, true);
+            setTimeout(function () { window.location.reload(); }, 600);
+          } else {
+            showToast(data.message || 'Unable to save change.', false);
+          }
+        })
+        .catch(function () { showToast('Request failed. Check your connection.', false); });
+    }
+
+    function assignMenu(userId, menuId, title) {
+      post({ user_id: userId, action: 'assign', menu_id: menuId }, 'Assigning ' + title + ' to ' + userId + ' ...');
+    }
+
+    function removeMenu(userId, menuId, title) {
+      post({ user_id: userId, action: 'remove', menu_id: menuId }, 'Removing ' + title + ' from ' + userId + ' ...');
+    }
+
+    function toggleSupport(userId, action) {
+      var verb = action === 'set_support' ? 'Making Bank Support' : 'Removing Bank Support';
+      post({ user_id: userId, action: action }, verb + ' ' + userId + ' ...');
+    }
+
+    /* ---- drag & drop: tray chips -> drop on user card ---- */
+    var dragData = null;
+
+    document.querySelectorAll('.menu-chip').forEach(function (chip) {
+      chip.addEventListener('dragstart', function (e) {
+        dragData = {
+          type: 'menu',
+          menuId: chip.getAttribute('data-menu-id'),
+          menuTitle: chip.getAttribute('data-menu-title')
+        };
+        chip.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'copy';
+        try { e.dataTransfer.setData('text/plain', chip.getAttribute('data-menu-title')); } catch (err) {}
+      });
+      chip.addEventListener('dragend', function () { chip.classList.remove('dragging'); });
+    });
+
+    document.querySelectorAll('.user-card').forEach(function (card) {
+      card.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        if (dragData && dragData.type === 'menu') card.classList.add('droppable-over');
+      });
+      card.addEventListener('dragleave', function () { card.classList.remove('droppable-over'); });
+      card.addEventListener('drop', function (e) {
+        e.preventDefault();
+        card.classList.remove('droppable-over');
+        if (!dragData || dragData.type !== 'menu') return;
+        assignMenu(card.getAttribute('data-user-id'), dragData.menuId, dragData.menuTitle);
+        dragData = null;
+      });
+    });
+
+    /* ---- remove menu via cross button ---- */
+    document.querySelectorAll('.acc-chip .remove-x').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var chip = btn.closest('.acc-chip');
+        var card = btn.closest('.user-card');
+        removeMenu(card.getAttribute('data-user-id'), chip.getAttribute('data-menu-id'), chip.getAttribute('data-menu-title'));
+      });
+    });
+
+    /* ---- Bank Support toggle (superadmin) ---- */
+    document.querySelectorAll('.bs-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var card = btn.closest('.user-card');
+        toggleSupport(card.getAttribute('data-user-id'), btn.getAttribute('data-action'));
+      });
+    });
+
+    /* ---- search filter ---- */
+    var search = document.getElementById('userSearch');
+    if (search) {
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        document.querySelectorAll('.user-card').forEach(function (card) {
+          var hay = (card.getAttribute('data-fullname') + ' ' + card.getAttribute('data-user-id') + ' ' + card.getAttribute('data-email')).toLowerCase();
+          card.style.display = hay.indexOf(q) === -1 ? 'none' : '';
+        });
+      });
+    }
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Manager Dashboard | JB Call Center{% endblock %}
+{% block page_heading %}Manager Dashboard{% endblock %}
+{% block page_title %}Manager Operational Dashboard{% endblock %}
+{% block page_sub %}Approve pending registrations and unlock locked accounts.{% endblock %}
+
+{% block content %}
+<div class="tiles">
+  <div class="tile warn">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ pending_users|length }}</div>
+      <div class="tile-label">Pending Approvals</div>
+      <a class="tile-link" href="{% url 'pending_registration' %}">Review queue &rarr;</a>
+    </div>
+  </div>
+
+  <div class="tile danger">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ locked_users|length }}</div>
+      <div class="tile-label">Locked Accounts</div>
+    </div>
+  </div>
+
+  <div class="tile ok">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ active_users|length }}</div>
+      <div class="tile-label">Active Users</div>
+    </div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Pending Registrations</div>
+        <div class="panel-sub">New users awaiting approval</div>
+      </div>
+    </div>
+    <div class="panel-body flush">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Full Name</th>
+              <th>Mobile</th>
+              <th>NID</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in pending_users %}
+            <tr>
+              <td class="strong">{{ u.fullname }}</td>
+              <td class="num">{{ u.mobile }}</td>
+              <td class="num muted">{{ u.nid }}</td>
+              <td>
+                <a class="btn btn-success btn-sm" href="{% url 'approve_user' u.registration_id %}" onclick="return confirm('Approve this user?');">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+                  Approve
+                </a>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="empty">No pending registrations found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Locked Accounts</div>
+        <div class="panel-sub">Accounts locked after too many failed attempts</div>
+      </div>
+    </div>
+    <div class="panel-body flush">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Full Name</th>
+              <th>Attempts</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in locked_users %}
+            <tr>
+              <td class="strong">{{ u.user_id }}</td>
+              <td>{{ u.fullname }}</td>
+              <td><span class="badge badge-danger">{{ u.failed_attempts }}</span></td>
+              <td>
+                <a class="btn btn-warning btn-sm" href="{% url 'unlock_user' u.user_id %}?next=manager_dashboard" onclick="return confirm('Unlock this account and reset password?');">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>
+                  Unlock
+                </a>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="empty">No locked accounts found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Active Users</div>
+      <div class="panel-sub">All currently active accounts on the portal</div>
+    </div>
+    <span class="badge badge-good">{{ active_users|length }} active</span>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap" style="max-height:520px; overflow-y:auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Photo</th>
+            <th>User ID</th>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in active_users %}
+          <tr>
+            <td>
+              {% if u.image_path %}
+                <img src="{{ u.image_path }}" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+              {% else %}
+                <span class="topbar-avatar" style="width:34px;height:34px;">{{ u.fullname|slice:":1"|upper }}</span>
+              {% endif %}
+            </td>
+            <td class="strong code">{{ u.user_id }}</td>
+            <td>{{ u.fullname }}</td>
+            <td class="num">{{ u.mobile }}</td>
+            <td class="muted">{{ u.email }}</td>
+            <td><span class="badge badge-info">{{ u.role_name|default:"—" }}</span></td>
+            <td>
+              <span class="badge {% if u.status == 'ACTIVE' %}badge-good{% elif u.status == 'LOCKED' %}badge-warn{% else %}badge-danger{% endif %}">{{ u.status }}</span>
+            </td>
+            <td class="muted">{{ u.created_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="empty">No active users found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

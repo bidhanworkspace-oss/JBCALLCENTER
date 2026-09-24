@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Raise Ticket | JB Call Center{% endblock %}
+{% block page_heading %}Raise a Ticket{% endblock %}
+{% block page_title %}Raise Support Ticket{% endblock %}
+{% block page_sub %}Describe the customer issue so our support team can resolve it.{% endblock %}
+
+{% block content %}
+<div class="two-col" style="grid-template-columns:minmax(0, 760px) 1fr;">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Ticket Details</div>
+        <div class="panel-sub">Fields marked * are required (Mobile No or Account No required)</div>
+      </div>
+    </div>
+    <form action="{% url 'raise_ticket' %}" method="POST" enctype="multipart/form-data" id="ticketForm">
+      {% csrf_token %}
+      <div class="panel-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="tk_issue">Issue Type *</label>
+            <select class="form-control" id="tk_issue" name="issue_type" required>
+              <option value="">-- Select Issue --</option>
+              {% for it in issue_types %}
+              <option value="{{ it.id }}">{{ it.id }}. {{ it.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tk_priority">Priority *</label>
+            <select class="form-control" id="tk_priority" name="priority" required>
+              <option value="">-- Select Priority --</option>
+              {% for p in priorities %}
+              <option value="{{ p }}">{{ p|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tk_name">Customer Name</label>
+            <input class="form-control" type="text" id="tk_name" name="customer_name" placeholder="Full name of the customer">
+          </div>
+          <div class="form-group">
+            <label for="tk_mobile">Mobile No</label>
+            <input class="form-control" type="text" id="tk_mobile" name="mobile_no" placeholder="e.g. 01712345678">
+          </div>
+          <div class="form-group">
+            <label for="tk_account">Account No</label>
+            <input class="form-control" type="text" id="tk_account" name="account_no" placeholder="Bank account number">
+          </div>
+          <div class="form-group">
+            <label for="tk_attachment">Attachment (optional)</label>
+            <input class="form-control" type="file" id="tk_attachment" name="attachment" accept=".jpg,.jpeg,.png,.pdf" style="padding:.55rem .8rem;">
+            <div class="form-note" id="tkFileNote" style="margin:.4rem 0 0;"></div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:.2rem;">
+          <label for="tk_remarks">Remarks</label>
+          <textarea class="form-control" id="tk_remarks" name="remarks" rows="4" placeholder="Describe the issue in detail (e.g. transaction failed with error XYZ, customer needs unlock, etc.)"></textarea>
+        </div>
+        <div style="display:flex; gap:.7rem; flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 8l4-5 4 5"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+            Raise Ticket
+          </button>
+          <a class="btn btn-ghost" href="{% url 'tickets' %}">View My/All Tickets</a>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Issue Categories</div>
+        <div class="panel-sub">Select the closest match so the ticket routes faster</div>
+      </div>
+    </div>
+    <div class="panel-body">
+      <ul style="list-style:none; display:grid; gap:.5rem;">
+        {% for it in issue_types %}
+        <li style="display:flex; align-items:flex-start; gap:.55rem; font-size:.85rem;">
+          <span class="badge badge-info">{{ it.id }}</span>
+          <span class="strong">{{ it.name }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var form = document.getElementById('ticketForm');
+    var mobile = document.getElementById('tk_mobile');
+    var account = document.getElementById('tk_account');
+    var fileInput = document.getElementById('tk_attachment');
+    var fileNote = document.getElementById('tkFileNote');
+
+    fileInput.addEventListener('change', function () {
+      var f = fileInput.files[0];
+      if (!f) { fileNote.textContent = ''; return; }
+      var okType = /^image\/(jpeg|png)$/.test(f.type) || /\.pdf$/i.test(f.name) || /\.(jpe?g|png)$/i.test(f.name);
+      var okSize = f.size <= 5 * 1024 * 1024;
+      fileNote.style.color = (okType && okSize) ? 'var(--success)' : 'var(--danger)';
+      fileNote.textContent = (okType && okSize)
+        ? 'Attachment ready: ' + f.name
+        : (okSize ? 'Only JPG, PNG or PDF files are allowed (max 5 MB).' : 'File too large (max 5 MB).');
+    });
+
+    form.addEventListener('submit', function (e) {
+      if (!mobile.value.trim() && !account.value.trim()) {
+        alert('Please provide at least the customer Mobile No or Account No.');
+        e.preventDefault();
+      }
+    });
+  })();
+</script>
+{% endblock %}

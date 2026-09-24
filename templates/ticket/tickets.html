@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Tickets | JB Call Center{% endblock %}
+{% block page_heading %}Support Tickets{% endblock %}
+{% block page_title %}Raised Tickets{% endblock %}
+{% block page_sub %}Track every support ticket from raising to resolution.{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-head" style="flex-wrap:wrap;">
+    <div>
+      <div class="panel-title">Ticket Queue</div>
+      <div class="panel-sub">
+        {% if filter_mode == 'PRIORITY' %}
+          Sorted by priority (Very High first), then newest on top
+        {% else %}
+          Sorted by newest first
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
+      <a class="btn btn-primary" href="{% url 'raise_ticket' %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Raise New Ticket
+      </a>
+      <a class="btn {% if filter_mode == 'LATEST' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=latest">Latest Tickets</a>
+      <a class="btn {% if filter_mode == 'PRIORITY' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=priority">High Priority First</a>
+    </div>
+  </div>
+
+  <div class="panel-body flush">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Ticket Ref</th>
+            <th>Issue Type</th>
+            <th>Customer</th>
+            <th>Mobile</th>
+            <th>Account</th>
+            <th>Priority</th>
+            <th>Status</th>
+            <th>Raised By</th>
+            <th>Raised On</th>
+            <th>View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tickets %}
+          <tr>
+            <td class="strong code">{{ t.ticket_ref }}</td>
+            <td>{{ t.issue_type }}</td>
+            <td>{{ t.customer_name|default:"—" }}</td>
+            <td class="num">{{ t.mobile_no|default:"—" }}</td>
+            <td class="num muted">{{ t.account_no|default:"—" }}</td>
+            <td>
+              <span class="badge {% if t.priority == 'VERY HIGH' %}badge-danger{% elif t.priority == 'HIGH' %}badge-warn{% else %}badge-info{% endif %}">{{ t.priority|title }}</span>
+            </td>
+            <td>
+              <span class="badge {% if t.status == 'SOLVED' %}badge-good{% elif t.status == 'DENIED' %}badge-danger{% elif t.status == 'IN_PROGRESS' %}badge-warn{% else %}badge-info{% endif %}">{{ t.status_label }}</span>
+            </td>
+            <td class="code muted">{{ t.raised_by_user_id }}</td>
+            <td class="num muted">{{ t.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              <a class="btn btn-ghost btn-sm" href="{% url 'ticket_detail' t.ticket_id %}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                View
+              </a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="10" class="empty">No tickets found. Click "Raise New Ticket" to create one.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

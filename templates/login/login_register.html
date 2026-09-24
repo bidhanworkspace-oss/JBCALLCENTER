@@ -1,0 +1,543 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign In | JB Call Center Portal</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2313577f' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a8 8 0 1 1 16 0'/%3E%3Crect x='3' y='14' width='4' height='6' rx='2'/%3E%3Crect x='17' y='14' width='4' height='6' rx='2'/%3E%3Cpath d='M17 19v1a2 2 0 0 1-2 2h-2'/%3E%3C/svg%3E">
+<style>
+    :root {
+        --sky-900: #0b3a5c;
+        --sky-700: #135b84;
+        --sky-600: #1777a8;
+        --sky-500: #2b9fe0;
+        --sky-400: #6fc3ef77;
+        --gold: #f5b301;
+        --ink: #142b3b;
+        --ink-muted: #5c7182;
+        --surface: #ffffff;
+        --bg: #f2f7fb;
+        --line: #e2ecf3;
+        --danger: #e0524a;
+        --shadow: 0 24px 60px -22px rgba(11, 58, 92, 0.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+        height: 100%;
+        font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+        color: var(--ink);
+        background:
+            radial-gradient(1200px 600px at 85% -10%, rgba(43, 159, 224, 0.14), transparent 60%),
+            radial-gradient(900px 500px at -10% 110%, rgba(245, 179, 1, 0.10), transparent 55%),
+            var(--bg);
+    }
+
+    .shell {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+    }
+
+    .card {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        width: 100%;
+        max-width: 960px;
+        min-height: 600px;
+        background: var(--surface);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+    }
+
+    /* ---------- Brand panel ---------- */
+    .brand {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 3rem 2.75rem;
+        color: #fff;
+        background:
+            linear-gradient(160deg, rgba(8, 28, 46, 0.35), rgba(8, 28, 46, 0.15)),
+            linear-gradient(135deg, var(--sky-900) 0%, var(--sky-600) 100%);
+    }
+    .brand::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+            radial-gradient(circle at 20% 18%, rgba(255,255,255,0.08) 0 90px, transparent 91px),
+            radial-gradient(circle at 88% 82%, rgba(245,179,1,0.18) 0 130px, transparent 131px),
+            linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
+            linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px);
+        background-size: auto, auto, 36px 36px, 36px 36px;
+        pointer-events: none;
+    }
+    .brand > * { position: relative; z-index: 1; }
+
+    .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+    }
+    .logo-image {
+        height: 52px;
+        width: auto;
+        max-width: 160px;
+        object-fit: contain;
+        filter: drop-shadow(0 10px 22px rgba(11, 58, 92, 0.35));
+    }
+    .logo-name { line-height: 1.15; }
+    .logo-name strong { display: block; font-size: 1.35rem; letter-spacing: 0.3px; }
+    .logo-name span { font-size: 0.78rem; opacity: 0.82; letter-spacing: 2.2px; text-transform: uppercase; }
+
+    .call-badge {
+        margin-left: auto;
+        flex: none;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        display: grid;
+        place-items: center;
+    }
+    .call-badge svg {
+        width: 24px;
+        height: 24px;
+        stroke: var(--gold);
+        stroke-width: 2.2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .brand h1 {
+        font-size: 2.1rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 2rem 0 1rem;
+    }
+    .brand p.sub {
+        font-size: 0.98rem;
+        line-height: 1.65;
+        opacity: 0.88;
+        max-width: 34ch;
+    }
+
+    .features { list-style: none; margin-top: 2rem; display: grid; gap: 0.85rem; }
+    .features li { display: flex; align-items: center; gap: 0.7rem; font-size: 0.9rem; }
+    .features svg { flex: none; width: 20px; height: 20px; stroke: var(--gold); stroke-width: 2.4; fill: none; }
+
+    .brand-foot { display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; opacity: 0.72; }
+
+    /* ---------- Form panel ---------- */
+    .panel { padding: 2.75rem 2.5rem; display: flex; flex-direction: column; }
+    .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        padding: 4px;
+        background: #eef5f9;
+        border-radius: 12px;
+        margin-bottom: 1.75rem;
+    }
+    .tab-btn {
+        padding: 0.65rem;
+        border: none;
+        background: transparent;
+        border-radius: 9px;
+        font-weight: 700;
+        font-size: 0.92rem;
+        color: var(--ink-muted);
+        cursor: pointer;
+        transition: all 0.22s ease;
+        font-family: inherit;
+    }
+    .tab-btn.active { background: #fff; color: var(--sky-700); box-shadow: 0 4px 12px rgba(19, 91, 132, 0.12); }
+    .tab-btn:focus-visible { outline: 2px solid var(--sky-500); outline-offset: 1px; }
+
+    .form-content { animation: fade 0.28s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .form-title { font-size: 1.45rem; font-weight: 700; }
+    .form-sub { font-size: 0.88rem; color: var(--ink-muted); margin: 0.3rem 0 1.5rem; }
+
+    .field { margin-bottom: 1.1rem; }
+    .field label { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .field .forgot {
+        font-size: 0.75rem; color: var(--sky-600); text-decoration: none; font-weight: 600;
+    }
+    .field .forgot:hover { text-decoration: underline; }
+
+    .input-wrap { position: relative; }
+    .input-wrap svg {
+        position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+        width: 18px; height: 18px; color: var(--ink-muted); pointer-events: none;
+    }
+    input[type="text"], input[type="email"], input[type="password"] {
+        width: 100%;
+        padding: 0.8rem 2.6rem 0.8rem 2.7rem;
+        border: 1.5px solid var(--line);
+        border-radius: 11px;
+        font-size: 0.92rem;
+        color: var(--ink);
+        background: #f8fbfd;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+        font-family: inherit;
+    }
+    input::placeholder { color: #94a8b8; }
+    input:focus { border-color: var(--sky-500); background: #fff; box-shadow: 0 0 0 4px rgba(43, 159, 224, 0.14); }
+    input.error { border-color: var(--danger); box-shadow: 0 0 0 4px rgba(224, 82, 74, 0.12); }
+
+    .toggle-pwd {
+        position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+        width: 34px; height: 34px; display: grid; place-items: center;
+        border: none; background: transparent; color: var(--ink-muted); cursor: pointer; border-radius: 8px;
+    }
+    .toggle-pwd:hover { color: var(--sky-700); background: #eef5f9; }
+    .toggle-pwd svg { width: 19px; height: 19px; position: static; transform: none; }
+
+    .error-msg { display: none; font-size: 0.75rem; color: var(--danger); margin-top: 0.3rem; }
+    .field.invalid .error-msg { display: block; }
+
+    .btn {
+        width: 100%;
+        padding: 0.85rem;
+        border: none;
+        border-radius: 11px;
+        font-size: 0.98rem;
+        font-weight: 700;
+        color: #fff;
+        background: linear-gradient(135deg, var(--sky-600), var(--sky-500));
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+        margin-top: 0.5rem;
+        font-family: inherit;
+        position: relative;
+    }
+    .btn:hover { box-shadow: 0 12px 24px -10px rgba(43, 159, 224, 0.55); transform: translateY(-1px); }
+    .btn:active { transform: none; }
+    .btn:disabled { opacity: 0.75; cursor: wait; transform: none; box-shadow: none; }
+    .btn .spinner {
+        display: none; position: absolute; left: 50%; top: 50%;
+        width: 18px; height: 18px; margin: -9px 0 0 -9px;
+        border: 2.5px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+    .btn.loading { color: transparent; }
+    .btn.loading .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .panel-foot { margin-top: auto; padding-top: 2rem; font-size: 0.74rem; color: var(--ink-muted); text-align: center; }
+
+    /* ---------- Alerts ---------- */
+    .alerts { margin-bottom: 1rem; display: grid; gap: 0.5rem; }
+    .alert {
+        padding: 0.75rem 0.9rem; border-radius: 10px; font-size: 0.85rem; line-height: 1.45;
+        display: flex; align-items: flex-start; gap: 0.55rem; animation: fade 0.28s ease;
+    }
+    .alert svg { flex: none; width: 17px; height: 17px; margin-top: 1px; }
+    .alert-error { background: #fdeeea; border: 1px solid #f5c6bd; color: #a33a2f; }
+    .alert-success { background: #e7f3fb; border: 1px solid #bfe0f2; color: #135b84; }
+
+    @media (max-width: 760px) {
+        .card { grid-template-columns: 1fr; max-width: 480px; }
+        .brand { display: none; }
+        .panel { padding: 2.25rem 1.75rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+</style>
+</head>
+<body>
+<div class="shell">
+    <div class="card">
+
+        <!-- Brand panel -->
+        <aside class="brand" aria-hidden="true">
+            <div class="logo">
+                <img class="logo-image" src="{% static 'logo.png' %}" alt="Janata Bank Logo">
+                <div class="logo-name">
+                    <strong>Janata Bank PLC</strong>
+                </div>
+                <span class="call-badge" title="24/7 Call Center">
+                    <svg viewBox="0 0 24 24"><path d="M4 14a8 8 0 1 1 16 0"/><rect x="3" y="14" width="4" height="6" rx="2"/><rect x="17" y="14" width="4" height="6" rx="2"/><path d="M17 19v1a2 2 0 0 1-2 2h-2"/></svg>
+                </span>
+            </div>
+
+            <div>
+                <h1>Call Center</h1>
+                <p class="sub">Sign in to handle customer enquiries and day-to-day service operations — all in one place.</p>
+                <ul class="features">
+                    <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Role-based secure access &amp; audit trail</li>
+                    <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Pending registration &amp; user approvals</li>                    
+                </ul>
+            </div>
+
+            <div class="brand-foot">
+                <span>&copy; 2026 Janata Bank PLC.</span>
+                <span>Internal Use Only</span>
+            </div>
+        </aside>
+
+        <!-- Form panel -->
+        <main class="panel">
+            <div class="tabs" role="tablist">
+                <button class="tab-btn active" id="tab-login" role="tab" onclick="switchTab('login')">Sign In</button>
+                <button class="tab-btn" id="tab-register" role="tab" onclick="switchTab('register')">Register</button>
+            </div>
+
+            {% if messages %}
+            <div class="alerts">
+                {% for message in messages %}
+                <div class="alert {% if message.tags == 'error' %}alert-error{% else %}alert-success{% endif %}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        {% if message.tags == 'error' %}
+                        <circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/>
+                        {% else %}
+                        <path d="M4 12l5 5L20 6"/>
+                        {% endif %}
+                    </svg>
+                    <span>{{ message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- LOGIN -->
+            <div id="login" class="form-content" role="tabpanel">
+                <h2 class="form-title">Welcome back</h2>
+                <p class="form-sub">Enter your credentials to continue.</p>
+
+                <form id="loginForm" action="{% url 'login_page' %}" method="POST" novalidate>
+                    {% csrf_token %}
+                    <div class="field" id="fld-userid">
+                        <label for="login_user_id">User ID</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg>
+                            <input type="text" id="login_user_id" name="user_id" placeholder="e.g. JB10001" autocomplete="username" autocapitalize="characters" spellcheck="false" required>
+                        </div>
+                        <div class="error-msg" id="err-userid">Please enter your User ID.</div>
+                    </div>
+
+                    <div class="field" id="fld-pwd">
+                        <label for="login_pwd">
+                            Password
+                            <a class="forgot" href="{% url 'forgot_password' %}">Forgot password?</a>
+                        </label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                            <input type="password" id="login_pwd" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+                            <button type="button" class="toggle-pwd" aria-label="Show password" onclick="togglePwd('login_pwd', this)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                        <div class="error-msg" id="err-pwd">Please enter your password.</div>
+                    </div>
+
+                    <button type="submit" class="btn" id="loginBtn">
+                        Sign In
+                        <span class="spinner"></span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- REGISTER -->
+            <div id="register" class="form-content" role="tabpanel" style="display:none;">
+                <h2 class="form-title">Create your account</h2>
+                <p class="form-sub">Register to request Call Center portal access.</p>
+
+                <form id="regForm" action="{% url 'register' %}" method="POST" enctype="multipart/form-data" novalidate>
+                    {% csrf_token %}
+                    <div class="field" id="fld-name">
+                        <label for="reg_name">Full Name</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                            <input type="text" id="reg_name" name="fullname" placeholder="e.g. Md. Rahim Uddin" autocomplete="name" required>
+                        </div>
+                        <div class="error-msg">Please enter your full name.</div>
+                    </div>
+
+                    <div class="field" id="fld-mobile">
+                        <label for="reg_mobile">Mobile Number</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+                            <input type="text" id="reg_mobile" name="mobile" placeholder="e.g. 01712345678" autocomplete="tel" required>
+                        </div>
+                        <div class="error-msg">Enter a valid BD mobile number (e.g. 01712345678).</div>
+                    </div>
+
+                    <div class="field" id="fld-email">
+                        <label for="reg_email">Email Address</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg>
+                            <input type="email" id="reg_email" name="email" placeholder="you@example.com" autocomplete="email" required>
+                        </div>
+                        <div class="error-msg">Enter a valid email address.</div>
+                    </div>
+
+                    <div class="field" id="fld-nid">
+                        <label for="reg_nid">NID Number</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+                            <input type="text" id="reg_nid" name="nid" placeholder="10 or 17 digit NID" autocomplete="off" required>
+                        </div>
+                        <div class="error-msg">Enter a valid NID number (10 or 17 digits).</div>
+                    </div>
+
+                    <div class="field" id="fld-file">
+                        <label for="reg_file">NID Attachment (JPG / PNG Only, Max 3 MB)</label>
+                        <div class="input-wrap">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12"/><path d="M8 8l4-5 4 5"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+                            <input type="file" id="reg_file" name="attachment" accept=".jpg,.jpeg,.png" style="padding-left:2.7rem;" required>
+                        </div>
+                        <div class="error-msg">Please attach your NID document (JPG/PNG only, max 3 MB).</div>
+                    </div>
+
+                    <button type="submit" class="btn" id="regBtn">
+                        Submit Registration
+                        <span class="spinner"></span>
+                    </button>
+                </form>
+            </div>
+
+            <div class="panel-foot">Authorized personnel only &middot; All access is monitored</div>
+        </main>
+    </div>
+</div>
+
+<script>
+    "use strict";
+
+    /* ---------- Tab switching ---------- */
+    function switchTab(tab) {
+        var on = tab === 'register';
+        document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+        document.getElementById(on ? 'tab-register' : 'tab-login').classList.add('active');
+        document.getElementById('login').style.display = on ? 'none' : 'block';
+        document.getElementById('register').style.display = on ? 'block' : 'none';
+        setTimeout(function () {
+            document.getElementById(on ? 'reg_name' : 'login_user_id').focus();
+        }, 10);
+    }
+
+    /* ---------- Password visibility toggle ---------- */
+    function togglePwd(inputId, btn) {
+        var input = document.getElementById(inputId);
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.innerHTML = show
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    }
+
+    /* ---------- Validation helpers ---------- */
+    function field(id) { return document.getElementById(id); }
+    function markValid(fldEl) { fldEl.classList.remove('invalid'); }
+    function markInvalid(fldEl) { fldEl.classList.add('invalid'); }
+    function setInputError(input, flag) { input.classList.toggle('error', flag); }
+
+    var bdMobile = /^01[3-9]\d{8}$/;
+    var nid10 = /^\d{10}$/;
+    var nid17 = /^\d{17}$/;
+
+    /* Login form */
+    var loginForm = field('loginForm');
+    var userIdIn = field('login_user_id');
+    var pwdIn = field('login_pwd');
+
+    function onInputUppercase(e) { e.target.value = e.target.value.toUpperCase(); }
+    userIdIn.addEventListener('input', onInputUppercase);
+
+    function validateLogin() {
+        var ok = true;
+
+        var userIdV = userIdIn.value.trim();
+        if (!userIdV) { markInvalid(field('fld-userid')); setInputError(userIdIn, true); ok = false; }
+        else if (userIdV.length < 3) {
+            field('fld-userid').classList.add('invalid');
+            field('err-userid').textContent = 'User ID looks too short.';
+            setInputError(userIdIn, true); ok = false;
+        } else { markValid(field('fld-userid')); setInputError(userIdIn, false); }
+
+        if (!pwdIn.value) { markInvalid(field('fld-pwd')); setInputError(pwdIn, true); ok = false; }
+        else { markValid(field('fld-pwd')); setInputError(pwdIn, false); }
+
+        if (ok) { userIdIn.value = userIdV; }
+        return ok;
+    }
+    loginForm.addEventListener('submit', function (e) {
+        if (!validateLogin()) { e.preventDefault(); return; }
+        var btn = field('loginBtn');
+        btn.classList.add('loading');
+        btn.disabled = true;
+    });
+
+    /* Register form */
+    var regForm = field('regForm');
+    var nameIn = field('reg_name'), mobileIn = field('reg_mobile'), emailIn = field('reg_email'),
+        nidIn = field('reg_nid'), fileIn = field('reg_file');
+
+    nidIn.addEventListener('input', function () { nidIn.value = nidIn.value.replace(/\D/g, ''); });
+
+    function validateRegister() {
+        var ok = true;
+
+        if (!nameIn.value.trim()) { markInvalid(field('fld-name')); setInputError(nameIn, true); ok = false; }
+        else { markValid(field('fld-name')); setInputError(nameIn, false); }
+
+        var mv = mobileIn.value.trim();
+        if (!bdMobile.test(mv)) { markInvalid(field('fld-mobile')); setInputError(mobileIn, true); ok = false; }
+        else { markValid(field('fld-mobile')); setInputError(mobileIn, false); }
+
+        var ev = emailIn.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ev)) { markInvalid(field('fld-email')); setInputError(emailIn, true); ok = false; }
+        else { markValid(field('fld-email')); setInputError(emailIn, false); }
+
+        var nv = nidIn.value.trim();
+        if (!(nid10.test(nv) || nid17.test(nv))) { markInvalid(field('fld-nid')); setInputError(nidIn, true); ok = false; }
+        else { markValid(field('fld-nid')); setInputError(nidIn, false); }
+
+        if (!fileIn.files.length) { markInvalid(field('fld-file')); ok = false; }
+        else {
+            var f = fileIn.files[0];
+            var okType = /^image\/(jpeg|png)$/.test(f.type) || /\.(jpe?g|png)$/i.test(f.name);
+            var okSize = f.size <= 3 * 1024 * 1024;
+            if (!okType || !okSize) {
+                markInvalid(field('fld-file'));
+                document.querySelector('#fld-file .error-msg').textContent = okSize
+                    ? 'Only JPG or PNG files are allowed.'
+                    : 'File too large (max 3 MB).';
+                ok = false;
+            } else { markValid(field('fld-file')); }
+        }
+
+        if (ok) {
+            mobileIn.value = mv; emailIn.value = ev; nameIn.value = nameIn.value.trim();
+        }
+        return ok;
+    }
+    regForm.addEventListener('submit', function (e) {
+        if (!validateRegister()) { e.preventDefault(); return; }
+        var btn = field('regBtn');
+        btn.classList.add('loading');
+        btn.disabled = true;
+    });
+
+    /* Live "re-validate on input" */
+    [userIdIn, pwdIn].forEach(function (i) { i.addEventListener('input', function () { validateLogin(); }); });
+    [nameIn, mobileIn, emailIn, nidIn].forEach(function (i) { i.addEventListener('input', function () { validateRegister(); }); });
+
+    /* Autofocus first field */
+    window.addEventListener('load', function () { field('login_user_id').focus(); });
+</script>
+</body>
+</html>

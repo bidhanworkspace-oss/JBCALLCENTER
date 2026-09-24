@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Create Manager | JB Call Center{% endblock %}
+{% block page_heading %}Create Manager{% endblock %}
+{% block page_title %}Create Manager Account{% endblock %}
+{% block page_sub %}A temporary password will be emailed to the new manager.{% endblock %}
+
+{% block content %}
+<style>
+  .cm-error { color: var(--danger); font-size: .76rem; margin: .35rem 0 0; }
+  .form-control.cm-invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 4px rgba(214, 71, 62, 0.12);
+    background: #fff;
+  }
+  .form-group .cm-error { display: none; }
+  .form-group.cm-has-error .cm-error { display: block; }
+</style>
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Manager Details</div>
+        <div class="panel-sub">Official contact information and photo</div>
+      </div>
+    </div>
+    <form action="{% url 'create_manager' %}" method="POST" enctype="multipart/form-data" id="createManagerForm">
+      {% csrf_token %}
+      <div class="panel-body">
+        <div class="form-group" id="cm_fg_name">
+          <label for="cm_fullname">Full Name</label>
+          <input class="form-control" type="text" id="cm_fullname" name="fullname" placeholder="Enter full name" required>
+        </div>
+        <div class="form-group" id="cm_fg_mobile">
+          <label for="cm_mobile">Mobile Number</label>
+          <input class="form-control" type="text" id="cm_mobile" name="mobile" placeholder="e.g. 01712345678" required>
+          <div class="cm-error" id="cm_mobile_err">Enter a valid BD mobile number (e.g. 01712345678).</div>
+        </div>
+        <div class="form-group" id="cm_fg_email">
+          <label for="cm_email">Email Address</label>
+          <input class="form-control" type="email" id="cm_email" name="email" placeholder="you@example.com" required>
+          <div class="cm-error" id="cm_email_err">Enter a valid email address.</div>
+        </div>
+        <div class="form-group" id="cm_fg_nid">
+          <label for="cm_nid">NID Number</label>
+          <input class="form-control" type="text" id="cm_nid" name="nid" placeholder="10 or 17 digit NID" required>
+          <div class="cm-error" id="cm_nid_err">Enter a valid NID number (10 or 17 digits).</div>
+        </div>
+        <div class="form-group">
+          <label for="cm_photo">Photo (JPG / PNG only, max 5 MB)</label>
+          <div style="display:flex; align-items:flex-start; gap:.9rem;">
+            <div id="photoPreviewBox" style="flex:none; width:72px; height:72px; border-radius:14px; overflow:hidden; border:2px dashed var(--line); background:#f7fafc; display:grid; place-items:center;">
+              <img id="photoPreview" alt="" style="display:none; width:100%; height:100%; object-fit:cover;">
+              <span id="photoPlaceholder" style="color:var(--muted); font-size:1.6rem; line-height:1;">&#128100;</span>
+            </div>
+            <div style="flex:1;">
+              <input class="form-control" type="file" id="cm_photo" name="photo" accept=".jpg,.jpeg,.png" style="padding:.55rem .8rem;" required>
+              <div class="form-note" id="photoError" style="color:var(--danger); margin:.4rem 0 0; display:none;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel-head" style="border-top:1px solid var(--line); border-bottom:none;">
+        <button type="submit" class="btn btn-primary btn-block" id="cmSubmitBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+          Create Manager &amp; Dispatch Credentials
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var form = document.getElementById('createManagerForm');
+    var submitBtn = document.getElementById('cmSubmitBtn');
+
+    var photoInput = document.getElementById('cm_photo');
+    var preview = document.getElementById('photoPreview');
+    var placeholder = document.getElementById('photoPlaceholder');
+    var errorBox = document.getElementById('photoError');
+
+    var nameInput = document.getElementById('cm_fullname');
+    var mobileInput = document.getElementById('cm_mobile');
+    var emailInput = document.getElementById('cm_email');
+    var nidInput = document.getElementById('cm_nid');
+
+    function el(id) { return document.getElementById(id); }
+
+    function setField(grpId, input, invalid) {
+      var grp = el(grpId);
+      if (invalid) { grp.classList.add('cm-has-error'); input.classList.add('cm-invalid'); }
+      else { grp.classList.remove('cm-has-error'); input.classList.remove('cm-invalid'); }
+    }
+
+    nidInput.addEventListener('input', function () {
+      nidInput.value = nidInput.value.replace(/\D/g, '');
+    });
+
+    function validateName() {
+      var ok = !!nameInput.value.trim();
+      setField('cm_fg_name', nameInput, !ok);
+      return ok;
+    }
+
+    function validateMobile() {
+      var ok = /^01[3-9]\d{8}$/.test(mobileInput.value.trim());
+      setField('cm_fg_mobile', mobileInput, !ok);
+      return ok;
+    }
+
+    function validateEmail() {
+      var ok = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailInput.value.trim());
+      setField('cm_fg_email', emailInput, !ok);
+      return ok;
+    }
+
+    function validateNid() {
+      var ok = /^\d{10}$/.test(nidInput.value.trim()) || /^\d{17}$/.test(nidInput.value.trim());
+      setField('cm_fg_nid', nidInput, !ok);
+      return ok;
+    }
+
+    function validatePhoto() {
+      var file = photoInput.files && photoInput.files[0];
+      if (!file) {
+        errorBox.style.display = 'none';
+        return true;
+      }
+      var okType = /^image\/(jpeg|png)$/.test(file.type) || /\.(jpe?g|png)$/i.test(file.name);
+      var okSize = file.size <= 5 * 1024 * 1024;
+      if (!okType || !okSize) {
+        errorBox.textContent = okSize ? 'Only JPG or PNG files are allowed.' : 'File too large (max 5 MB).';
+        errorBox.style.display = 'block';
+        photoInput.value = '';
+        preview.style.display = 'none';
+        placeholder.style.display = 'block';
+        return false;
+      }
+      errorBox.style.display = 'none';
+      return true;
+    }
+
+    photoInput.addEventListener('change', function () {
+      if (!validatePhoto()) return;
+      var file = photoInput.files[0];
+      if (file && /^image\//.test(file.type)) {
+        var reader = new FileReader();
+        reader.onload = function (e) {
+          preview.src = e.target.result;
+          preview.style.display = 'block';
+          placeholder.style.display = 'none';
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    [nameInput, mobileInput, emailInput, nidInput].forEach(function (i) {
+      i.addEventListener('input', function () {
+        if (i === nameInput) validateName();
+        else if (i === mobileInput) validateMobile();
+        else if (i === emailInput) validateEmail();
+        else validateNid();
+      });
+    });
+
+    form.addEventListener('submit', function (e) {
+      var ok = validateName() && validateMobile() && validateEmail() && validateNid() && validatePhoto();
+      if (!ok) {
+        e.preventDefault();
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = 0.7;
+    });
+  })();
+</script>
+{% endblock %}

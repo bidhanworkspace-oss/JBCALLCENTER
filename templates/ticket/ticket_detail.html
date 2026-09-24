@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Ticket {{ ticket.ticket_ref }} | JB Call Center{% endblock %}
+{% block page_heading %}Ticket {{ ticket.ticket_ref }}{% endblock %}
+{% block page_title %}Ticket Details{% endblock %}
+{% block page_sub %}Full ticket information and the solver response section.{% endblock %}
+
+{% block content %}
+<p style="margin-bottom:1rem;">
+  <a class="btn btn-ghost btn-sm" href="{% url 'tickets' %}">
+    &larr; Back to Tickets
+  </a>
+</p>
+
+<div class="two-col" style="grid-template-columns:minmax(0, 720px) 1fr;">
+  <div style="display:grid; gap:1.4rem;">
+    <!-- Ticket info -->
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">{{ ticket.issue_type }}</div>
+          <div class="panel-sub">Ticket: <span class="code">{{ ticket.ticket_ref }}</span></div>
+        </div>
+        <div style="display:flex; gap:.4rem; flex-wrap:wrap;">
+          <span class="badge {% if ticket.priority == 'VERY HIGH' %}badge-danger{% elif ticket.priority == 'HIGH' %}badge-warn{% else %}badge-info{% endif %}">{{ ticket.priority|title }}</span>
+          <span class="badge {% if ticket.status == 'SOLVED' %}badge-good{% elif ticket.status == 'DENIED' %}badge-danger{% elif ticket.status == 'IN_PROGRESS' %}badge-warn{% else %}badge-info{% endif %}">{{ ticket.status_label }}</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Customer Name</label>
+            <div class="strong">{{ ticket.customer_name|default:"—" }}</div>
+          </div>
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Mobile No</label>
+            <div class="num">{{ ticket.mobile_no|default:"—" }}</div>
+          </div>
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Account No</label>
+            <div class="num">{{ ticket.account_no|default:"—" }}</div>
+          </div>
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Raised By</label>
+            <div class="code">{{ ticket.raised_by_user_id }}</div>
+          </div>
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Raised On</label>
+            <div>{{ ticket.created_at|date:"Y-m-d H:i:s" }}</div>
+          </div>
+          <div>
+            <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.2rem;">Attachment</label>
+            {% if ticket.attachment_path %}
+              <a class="btn btn-ghost btn-sm" href="{{ ticket.attachment_path }}" target="_blank">View Attachment</a>
+            {% else %}
+              <span class="muted">None</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:1rem;">
+          <label class="muted" style="font-size:.74rem; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:.35rem;">Customer / Raiser Remarks</label>
+          <div class="panel-body" style="background:#f8fbfd; border:1px solid var(--line); border-radius:12px; padding:1rem;">
+            {{ ticket.remarks|default:"No remarks provided." }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Response thread -->
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Response Thread</div>
+          <div class="panel-sub">{{ responses|length }} response{{ responses|length|pluralize }}</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        {% for r in responses %}
+        <div style="padding:.9rem 0; border-bottom:1px solid #eef4f8;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin-bottom:.45rem;">
+            <span class="code strong">{{ r.responder_user_id }}</span>
+            <span style="display:flex; align-items:center; gap:.5rem;">
+              <span class="badge {% if r.action == 'SOLVED' %}badge-good{% elif r.action == 'DENIED' %}badge-danger{% else %}badge-info{% endif %}">{{ r.action|title }}</span>
+              <span class="muted num" style="font-size:.74rem;">{{ r.created_at|date:"Y-m-d H:i:s" }}</span>
+            </span>
+          </div>
+          <div class="muted">{{ r.remarks|default:"—" }}</div>
+        </div>
+        {% empty %}
+        <p class="muted">No responses yet. Bank Support will add notes when they pick up the ticket.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Solver response -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Response / Solve Section</div>
+        <div class="panel-sub">Bank Support team only.</div>
+      </div>
+    </div>
+    {% if can_take_action %}
+    <form action="{% url 'ticket_detail' ticket.ticket_id %}" method="POST">
+      {% csrf_token %}
+      <div class="panel-body">
+        <div class="form-group">
+          <label for="tk_resp_remarks">Remarks</label>
+          <textarea class="form-control" id="tk_resp_remarks" name="remarks" rows="5" placeholder="Write your resolution note / remarks here..." required></textarea>
+        </div>
+        <div style="display:grid; gap:.5rem;">
+          <button type="submit" name="action" value="SOLVED" class="btn btn-success btn-block">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+            Mark as Solved
+          </button>
+          <button type="submit" name="action" value="DENIED" class="btn btn-danger btn-block">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            Mark as Denied
+          </button>
+          <button type="submit" name="action" value="NOTE" class="btn btn-ghost btn-block">Add Note Only (no status change)</button>
+        </div>
+      </div>
+    </form>
+    {% else %}
+    <div class="panel-body">
+      <p class="muted" style="font-size:.84rem;">
+        Only Bank Support users can solve or deny tickets. You can view the ticket and its progress here only.
+      </p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
