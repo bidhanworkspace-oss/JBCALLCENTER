@@ -61,6 +61,9 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    # After ForcePasswordChangeMiddleware (so a locked first-login session never
+    # pays for the extra reads) and after MessageMiddleware (it uses messages).
+    'login.middleware.UserSessionStateMiddleware',  # Re-read menu grants + account status on every request
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'login.middleware.NoCacheAuthenticatedMiddleware',  # Prevent caching of authenticated pages
     'login.middleware.AuditTrailMiddleware',  # Register Custom Audit Logging Middleware

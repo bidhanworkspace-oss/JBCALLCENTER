@@ -250,6 +250,7 @@ INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES
 INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('Raise Ticket',     'raise_ticket',          'bi-plus-circle',       8);
 INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('Tickets',          'tickets',               'bi-ticket-perforated', 9);
 INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('User Unlock',      'user_unlock',           'bi-unlock',           10);
+INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('Disable/Enable',   'disable_enable',        'bi-toggle2-on',       11);
 
 DECLARE
     v_mgr_mid NUMBER;
@@ -270,14 +271,18 @@ BEGIN
         WHERE NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 1 AND rmp.MENU_ID = SYSTEM_MENU.MENU_ID);
 
-    -- Manager (2): management + user menus
+    -- Manager (2): management + user menus.
+    -- 'user_unlock' and 'disable_enable' are BOTH granted: Unlock stays open
+    -- to every role that holds the menu, and Disable/Enable is the separate
+    -- screen for turning an account on or off.
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 2, MENU_ID FROM SYSTEM_MENU m
-        WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
-                             'audit_trail','change_password','raise_ticket','tickets',
-                             'user_unlock','assign_menu','approve_user','unlock_user')
-          AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
-                          WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
+    WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
+                         'audit_trail','change_password','raise_ticket','tickets',
+                         'user_unlock','disable_enable','assign_menu','approve_user','unlock_user')
+      AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
+                      WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
+
 
     -- User (3): non-admin menus only
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
@@ -342,23 +347,33 @@ EXCEPTION
 END;
 /
 
+-- Menu resolution rule used by every menu procedure in this script:
+--   a user holds a menu if USER_MENU_ASSIGNMENT has a row for it; if the user
+--   has NO per-user rows at all, fall back to the ROLE_MENU_PERMISSION grants
+--   of the user's role.  This is what makes an individual assign/remove on
+--   the "Assign Menu" screen actually change that user's sidebar.
 CREATE OR REPLACE PROCEDURE SP_GET_USER_MENUS (
     p_user_detail_id IN  NUMBER,
     p_menu_cursor    OUT SYS_REFCURSOR
 ) AS
 BEGIN
     OPEN p_menu_cursor FOR
-        SELECT DISTINCT m.MENU_ID,
-                        m.MENU_TITLE,
-                        m.URL_NAME,
-                        m.PARENT_ID,
-                        m.ICON_CLASS,
-                        m.DISPLAY_ORDER
+        SELECT m.MENU_ID, m.MENU_TITLE, m.URL_NAME, m.PARENT_ID,
+               m.ICON_CLASS, m.DISPLAY_ORDER
           FROM SYSTEM_MENU m
-               JOIN ROLE_MENU_PERMISSION rmp ON m.MENU_ID = rmp.MENU_ID
-               JOIN USERDETAIL u ON u.ROLE_ID = rmp.ROLE_ID
-         WHERE u.USERDETAILID = p_user_detail_id
-      ORDER BY m.PARENT_ID NULLS FIRST, m.DISPLAY_ORDER ASC;
+         WHERE EXISTS (SELECT 1
+                         FROM USER_MENU_ASSIGNMENT uma
+                        WHERE uma.USERDETAILID = p_user_detail_id
+                          AND uma.MENU_ID = m.MENU_ID)
+            OR (NOT EXISTS (SELECT 1
+                              FROM USER_MENU_ASSIGNMENT any_uma
+                             WHERE any_uma.USERDETAILID = p_user_detail_id)
+            AND EXISTS (SELECT 1
+                          FROM USERDETAIL u
+                          JOIN ROLE_MENU_PERMISSION rmp ON rmp.ROLE_ID = u.ROLE_ID
+                         WHERE u.USERDETAILID = p_user_detail_id
+                           AND rmp.MENU_ID = m.MENU_ID))
+      ORDER BY m.PARENT_ID NULLS FIRST, m.DISPLAY_ORDER ASC, m.MENU_ID;
 END;
 /
 
@@ -370,10 +385,20 @@ CREATE OR REPLACE PROCEDURE SP_CHECK_USER_MENU_ACCESS (
     v_count NUMBER := 0;
 BEGIN
     SELECT COUNT(1) INTO v_count
-    FROM SYSTEM_MENU m
-    JOIN ROLE_MENU_PERMISSION rmp ON m.MENU_ID = rmp.MENU_ID
-    JOIN USERDETAIL u ON u.ROLE_ID = rmp.ROLE_ID
-    WHERE u.USERDETAILID = p_user_detail_id AND m.URL_NAME = p_url_name;
+      FROM SYSTEM_MENU m
+     WHERE m.URL_NAME = p_url_name
+       AND ( EXISTS (SELECT 1
+                       FROM USER_MENU_ASSIGNMENT uma
+                      WHERE uma.USERDETAILID = p_user_detail_id
+                        AND uma.MENU_ID = m.MENU_ID)
+          OR (NOT EXISTS (SELECT 1
+                            FROM USER_MENU_ASSIGNMENT any_uma
+                           WHERE any_uma.USERDETAILID = p_user_detail_id)
+          AND EXISTS (SELECT 1
+                        FROM USERDETAIL u
+                        JOIN ROLE_MENU_PERMISSION rmp ON rmp.ROLE_ID = u.ROLE_ID
+                       WHERE u.USERDETAILID = p_user_detail_id
+                         AND rmp.MENU_ID = m.MENU_ID)) );
 
     IF v_count > 0 THEN
         p_has_access := 1;
@@ -656,25 +681,25 @@ END;
 -- ===========================================================================
 
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
-    p_superadmin_user_id IN NUMBER,
-    p_fullname IN VARCHAR2,
-    p_mobile IN VARCHAR2,
-    p_email IN VARCHAR2,
-    p_nid IN VARCHAR2,
-    p_image_path IN VARCHAR2,
-    p_temp_password IN VARCHAR2,
-    o_userid OUT VARCHAR2,
-    p_success OUT NUMBER,
-    p_msg OUT VARCHAR2
+    p_superadmin_user_id IN  NUMBER,
+    p_fullname            IN  VARCHAR2,
+    p_mobile              IN  VARCHAR2,
+    p_email               IN  VARCHAR2,
+    p_nid                 IN  VARCHAR2,
+    p_image_path          IN  VARCHAR2,
+    p_temp_password       IN  VARCHAR2,
+    o_userid              OUT VARCHAR2,
+    p_success             OUT NUMBER,
+    p_msg                 OUT VARCHAR2
 ) AS
-    v_role_id NUMBER;
-    v_superadmin_role VARCHAR2(50);
-    v_new_user_id  NUMBER;
+    v_role_id           NUMBER;
+    v_superadmin_role   VARCHAR2(50);
+    v_new_user_id       NUMBER;
 BEGIN
     SELECT UPPER(r.ROLE_NAME) INTO v_superadmin_role
-    FROM USERDETAIL u
-    JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
-    WHERE u.USERDETAILID = p_superadmin_user_id;
+      FROM USERDETAIL u
+      JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
+     WHERE u.USERDETAILID = p_superadmin_user_id;
 
     IF v_superadmin_role != 'SUPERADMIN' THEN
         p_success := 0;
@@ -682,7 +707,9 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT ROLE_ID INTO v_role_id FROM SYSTEM_ROLE WHERE UPPER(ROLE_NAME) = 'MANAGER';
+    SELECT ROLE_ID INTO v_role_id
+      FROM SYSTEM_ROLE
+     WHERE UPPER(ROLE_NAME) = 'MANAGER';
 
     o_userid := 'MGR' || FN_GET_NEXT_ID('MANAGER_USER_SEQ');
 
@@ -694,17 +721,19 @@ BEGIN
         v_role_id, 1, 'Enabled', p_superadmin_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
-    -- Standard manager menu set (fine-tuned later via Assign Menu).
     FOR mc IN (
         SELECT MENU_ID FROM SYSTEM_MENU
-        WHERE URL_NAME IN (
+         WHERE URL_NAME IN (
             'dashboard', 'manager_dashboard', 'pending_registration',
             'user_unlock', 'assign_menu', 'approve_user', 'unlock_user',
+            'disable_enable',
             'audit_trail', 'change_password', 'raise_ticket', 'tickets'
-        )
+         )
     ) LOOP
-        INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
-        VALUES (v_new_user_id, mc.MENU_ID, p_superadmin_user_id, CURRENT_TIMESTAMP);
+        INSERT INTO USER_MENU_ASSIGNMENT
+            (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
+        VALUES
+            (v_new_user_id, mc.MENU_ID, p_superadmin_user_id, CURRENT_TIMESTAMP);
     END LOOP;
 
     p_success := 1;
@@ -717,6 +746,167 @@ EXCEPTION
     WHEN OTHERS THEN
         p_success := 0;
         p_msg     := SQLERRM;
+END;
+/
+
+-- ---------------------------------------------------------------------------
+-- AUTO-DISABLE AFTER 3 FAILED LOGIN ATTEMPTS (every role) + RE-ENABLE
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE SP_REGISTER_FAILED_LOGIN (
+    p_user_detail_id IN  NUMBER,
+    p_max_attempts   IN  NUMBER,
+    o_attempts       OUT NUMBER,
+    o_disabled       OUT NUMBER,
+    o_status         OUT VARCHAR2
+) AS
+    v_attempts NUMBER := 0;
+    v_status   VARCHAR2(20) := 'ENABLED';
+BEGIN
+    o_attempts := 0;
+    o_disabled := 0;
+    o_status   := NULL;
+
+    SELECT NVL(FAILED_ATTEMPTS, 0), UPPER(NVL(USERSTATUS, 'ENABLED'))
+      INTO v_attempts, v_status
+      FROM USERDETAIL
+     WHERE USERDETAILID = p_user_detail_id;
+
+    v_attempts := v_attempts + 1;
+    o_attempts := v_attempts;
+
+    UPDATE USERDETAIL
+       SET FAILED_ATTEMPTS = v_attempts
+     WHERE USERDETAILID = p_user_detail_id;
+
+    IF v_attempts >= p_max_attempts AND v_status = 'ENABLED' THEN
+        UPDATE USERDETAIL
+           SET USERSTATUS = 'Disabled'
+         WHERE USERDETAILID = p_user_detail_id;
+        o_disabled := 1;
+        o_status   := 'Disabled';
+    ELSE
+        o_status := v_status;
+    END IF;
+
+    COMMIT;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        o_attempts := 0;
+    WHEN OTHERS THEN
+        o_attempts := 0;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE SP_RESET_FAILED_LOGIN (
+    p_user_detail_id IN NUMBER
+) AS
+BEGIN
+    UPDATE USERDETAIL
+       SET FAILED_ATTEMPTS = 0
+     WHERE USERDETAILID = p_user_detail_id;
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+/
+
+-- Policy: Superadmin may enable ANY account.  A Manager may only enable an
+-- account whose role is exactly 'User' - never a Manager or a Superadmin.
+-- ---------------------------------------------------------------------------
+--  Enforce the enable/disable policy in the database itself, so no caller
+--  (web view, background job or ad-hoc SQL session) can bypass it.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE SP_SET_USER_STATUS (
+    p_actor_user_detail_id  IN NUMBER,
+    p_target_user_detail_id IN NUMBER,
+    p_status                IN VARCHAR2,
+    p_remarks               IN VARCHAR2,
+    o_userid                OUT VARCHAR2,
+    p_success               OUT NUMBER,
+    p_msg                   OUT VARCHAR2
+) AS
+    v_actor_role  VARCHAR2(50);
+    v_target_role VARCHAR2(50) := '';
+    v_userid      VARCHAR2(30);
+    v_new_status  VARCHAR2(20);
+BEGIN
+    p_success := 0;
+    o_userid  := NULL;
+
+    v_new_status := UPPER(TRIM(NVL(p_status, 'ENABLED')));
+    IF v_new_status NOT IN ('ENABLED', 'DISABLED', 'LOCKED') THEN
+        p_msg := 'Invalid status: ' || p_status;
+        RETURN;
+    END IF;
+
+    SELECT UPPER(NVL(r.ROLE_NAME, '')) INTO v_actor_role
+      FROM USERDETAIL u
+      LEFT JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
+     WHERE u.USERDETAILID = p_actor_user_detail_id;
+
+    IF v_actor_role NOT IN ('SUPERADMIN', 'MANAGER') THEN
+        p_msg := 'Access Denied: Only a Superadmin or a Manager can enable or disable an account.';
+        RETURN;
+    END IF;
+
+    BEGIN
+        SELECT u.USERID, UPPER(NVL(r.ROLE_NAME, ''))
+          INTO v_userid, v_target_role
+          FROM USERDETAIL u
+          LEFT JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
+         WHERE u.USERDETAILID = p_target_user_detail_id;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            p_msg := 'Target user not found.';
+            RETURN;
+    END;
+
+    o_userid := v_userid;
+
+    IF p_actor_user_detail_id = p_target_user_detail_id THEN
+        p_msg := 'You cannot change the status of your own account.';
+        RETURN;
+    END IF;
+
+    IF v_actor_role = 'MANAGER' AND v_target_role <> 'USER' THEN
+        p_msg := 'Access Denied: a Manager can only enable or disable a regular User account. '
+              || 'Ask a Superadmin to handle ' || v_userid || '.';
+        RETURN;
+    END IF;
+
+    IF v_new_status = 'ENABLED' THEN
+        UPDATE USERDETAIL
+           SET USERSTATUS      = 'Enabled',
+               FAILED_ATTEMPTS = 0
+         WHERE USERDETAILID = p_target_user_detail_id;
+        p_msg := v_userid || ' has been enabled.';
+    ELSE
+        UPDATE USERDETAIL
+           SET USERSTATUS = INITCAP(v_new_status)
+         WHERE USERDETAILID = p_target_user_detail_id;
+        p_msg := v_userid || ' has been ' || LOWER(INITCAP(v_new_status)) || '.';
+    END IF;
+
+    p_success := 1;
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        p_success := 0;
+        p_msg     := SQLERRM;
+END;
+
+CREATE OR REPLACE PROCEDURE SP_ENABLE_USER (
+    p_actor_user_detail_id  IN NUMBER,
+    p_target_user_detail_id IN NUMBER,
+    p_remarks               IN VARCHAR2,
+    p_success               OUT NUMBER,
+    p_msg                   OUT VARCHAR2
+) AS
+    v_userid VARCHAR2(30);
+BEGIN
+    SP_SET_USER_STATUS(p_actor_user_detail_id, p_target_user_detail_id,
+                       'Enabled', p_remarks, v_userid, p_success, p_msg);
 END;
 /
 
@@ -1054,15 +1244,26 @@ END;
 /
 
 CREATE OR REPLACE PROCEDURE SP_UNLOCK_USER_BY_MOBILE (
-    p_mobile   IN VARCHAR2,
-    p_temp_hashed_password IN VARCHAR2,
-    o_userid   OUT VARCHAR2,
-    o_email    OUT VARCHAR2,
-    p_success  OUT NUMBER,
-    p_msg      OUT VARCHAR2
+    p_mobile               IN  VARCHAR2,
+    p_temp_hashed_password IN  VARCHAR2,
+    o_userid               OUT VARCHAR2,
+    o_email                OUT VARCHAR2,
+    o_status               OUT VARCHAR2,
+    p_success              OUT NUMBER,
+    p_msg                  OUT VARCHAR2
 ) AS
     v_user_detail_id NUMBER;
 BEGIN
+    p_success := 0;
+    o_userid  := NULL;
+    o_email   := NULL;
+    o_status  := NULL;
+
+    IF TRIM(NVL(p_mobile, ' ')) IS NULL THEN
+        p_msg := 'Mobile number is required.';
+        RETURN;
+    END IF;
+
     SELECT USERDETAILID INTO v_user_detail_id
       FROM (SELECT USERDETAILID
               FROM USERDETAIL
@@ -1071,17 +1272,29 @@ BEGIN
      WHERE ROWNUM = 1;
 
     SELECT USERID, EMAIL INTO o_userid, o_email
-      FROM USERDETAIL WHERE USERDETAILID = v_user_detail_id;
+      FROM USERDETAIL
+     WHERE USERDETAILID = v_user_detail_id;
 
-    UPDATE USERDETAIL
-       SET USERPASSWORD = p_temp_hashed_password,
-           USERSTATUS   = 'Enabled',
-           IS_FIRST_LOGIN = 1,
-           FAILED_ATTEMPTS = 0
+    IF p_temp_hashed_password IS NULL THEN
+        UPDATE USERDETAIL
+           SET USERSTATUS      = 'Enabled',
+               FAILED_ATTEMPTS = 0
+         WHERE USERDETAILID = v_user_detail_id;
+    ELSE
+        UPDATE USERDETAIL
+           SET USERPASSWORD    = p_temp_hashed_password,
+               USERSTATUS      = 'Enabled',
+               IS_FIRST_LOGIN  = 1,
+               FAILED_ATTEMPTS = 0
+         WHERE USERDETAILID = v_user_detail_id;
+    END IF;
+
+    SELECT USERSTATUS INTO o_status
+      FROM USERDETAIL
      WHERE USERDETAILID = v_user_detail_id;
 
     p_success := 1;
-    p_msg     := 'User unlocked and temporary password set.';
+    p_msg     := o_userid || ' has been unlocked.';
     COMMIT;
 EXCEPTION
     WHEN NO_DATA_FOUND THEN
@@ -1103,15 +1316,22 @@ CREATE OR REPLACE PROCEDURE SP_GET_ASSIGNABLE_MENUS (
 ) AS
 BEGIN
     OPEN o_cursor FOR
-        SELECT m.MENU_ID,
-               m.MENU_TITLE,
-               m.URL_NAME,
-               NVL(m.ICON_CLASS, '')
-          FROM USER_MENU_ASSIGNMENT uma
-          JOIN SYSTEM_MENU m ON uma.MENU_ID = m.MENU_ID
-         WHERE uma.USERDETAILID = p_actor_user_id
-           AND m.PARENT_ID IS NULL
-         ORDER BY m.DISPLAY_ORDER, m.MENU_TITLE;
+        SELECT m.MENU_ID, m.MENU_TITLE, m.URL_NAME, NVL(m.ICON_CLASS, '')
+          FROM SYSTEM_MENU m
+         WHERE m.PARENT_ID IS NULL
+           AND ( EXISTS (SELECT 1
+                           FROM USER_MENU_ASSIGNMENT uma
+                          WHERE uma.USERDETAILID = p_actor_user_id
+                            AND uma.MENU_ID = m.MENU_ID)
+              OR (NOT EXISTS (SELECT 1
+                                FROM USER_MENU_ASSIGNMENT any_uma
+                               WHERE any_uma.USERDETAILID = p_actor_user_id)
+              AND EXISTS (SELECT 1
+                            FROM USERDETAIL u
+                            JOIN ROLE_MENU_PERMISSION rmp ON rmp.ROLE_ID = u.ROLE_ID
+                           WHERE u.USERDETAILID = p_actor_user_id
+                             AND rmp.MENU_ID = m.MENU_ID)) )
+      ORDER BY m.DISPLAY_ORDER, m.MENU_TITLE;
 END;
 /
 
@@ -1204,6 +1424,12 @@ EXCEPTION
 END;
 /
 
+-- Policy:
+--   * only a Superadmin or a Manager may call it;
+--   * a Manager may only target an account whose role is exactly 'User'
+--     (Manager, Bank Support and Superadmin accounts are Superadmin-only);
+--   * nobody may change their own menus;
+--   * you may only grant a menu that you hold yourself.
 CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_actor_user_id  IN NUMBER,
     p_target_userid  IN VARCHAR2,
@@ -1212,12 +1438,14 @@ CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_success        OUT NUMBER,
     p_msg            OUT VARCHAR2
 ) AS
-    v_actor_role  VARCHAR2(50);
-    v_target_id   NUMBER;
-    v_target_role VARCHAR2(50) := '';
-    v_menu_count  NUMBER;
-    v_cnt         NUMBER;
-    v_menu_title  VARCHAR2(100);
+    v_actor_role      VARCHAR2(50);
+    v_target_id       NUMBER;
+    v_target_role     VARCHAR2(50) := '';
+    v_actor_per_user  NUMBER := 0;
+    v_target_per_user NUMBER := 0;
+    v_menu_count      NUMBER;
+    v_cnt             NUMBER;
+    v_menu_title      VARCHAR2(100);
 BEGIN
     p_success := 0;
 
@@ -1250,7 +1478,7 @@ BEGIN
     END IF;
 
     IF v_actor_role = 'MANAGER' AND v_target_role <> 'USER' THEN
-        p_msg := 'Access Denied: Managers can only assign menus to regular users.';
+        p_msg := 'Access Denied: Managers can only assign menus to regular User accounts.';
         RETURN;
     END IF;
 
@@ -1258,13 +1486,39 @@ BEGIN
       FROM SYSTEM_MENU
      WHERE MENU_ID = p_menu_id;
 
-    SELECT COUNT(1) INTO v_cnt
+    SELECT COUNT(1) INTO v_actor_per_user
       FROM USER_MENU_ASSIGNMENT
-     WHERE USERDETAILID = p_actor_user_id AND MENU_ID = p_menu_id;
+     WHERE USERDETAILID = p_actor_user_id;
+
+    IF v_actor_per_user > 0 THEN
+        SELECT COUNT(1) INTO v_cnt
+          FROM USER_MENU_ASSIGNMENT
+         WHERE USERDETAILID = p_actor_user_id AND MENU_ID = p_menu_id;
+    ELSE
+        SELECT COUNT(1) INTO v_cnt
+          FROM USERDETAIL u
+          JOIN ROLE_MENU_PERMISSION rmp ON rmp.ROLE_ID = u.ROLE_ID
+         WHERE u.USERDETAILID = p_actor_user_id
+           AND rmp.MENU_ID = p_menu_id;
+    END IF;
 
     IF v_cnt = 0 THEN
         p_msg := 'Access Denied: You may only grant menus that are assigned to you.';
         RETURN;
+    END IF;
+
+    -- First explicit edit for this target: materialise the role grants so the
+    -- single add/remove never silently wipes the user's other menus.
+    SELECT COUNT(1) INTO v_target_per_user
+      FROM USER_MENU_ASSIGNMENT
+     WHERE USERDETAILID = v_target_id;
+
+    IF v_target_per_user = 0 THEN
+        INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
+        SELECT v_target_id, rmp.MENU_ID, p_actor_user_id, CURRENT_TIMESTAMP
+          FROM USERDETAIL u
+          JOIN ROLE_MENU_PERMISSION rmp ON rmp.ROLE_ID = u.ROLE_ID
+         WHERE u.USERDETAILID = v_target_id;
     END IF;
 
     SELECT COUNT(1) INTO v_menu_count

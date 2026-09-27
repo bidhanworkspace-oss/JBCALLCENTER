@@ -1,4 +1,4 @@
-import re
+import logging
 import secrets
 import string
 from django.shortcuts import render, redirect
@@ -7,8 +7,11 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.contrib.auth.hashers import make_password, check_password
 
+from login.api import API, MAX_LOGIN_ATTEMPTS
 from login.decorators import permission_required_sp
 from login.utils import get_session_user, save_upload, dispatch_email, insertuserlog
+
+logger = logging.getLogger(__name__)
 
 
 def generate_random_password(length=10):
@@ -48,6 +51,37 @@ def _notify_password_changed(request):
     )
 
 
+def _register_failed_login(user_detail_id):
+    """Count one wrong password and disable the account at MAX_LOGIN_ATTEMPTS.
+
+    Applies to every role (user, bank support, manager and superadmin). The
+    account is re-enabled only from the Disable/Enable screen by a Manager
+    (user accounts) or a Superadmin (any account).
+
+    Returns the new attempt count (int); 0 when the counter could not be
+    written, in which case the caller still shows the invalid-credentials
+    message so a real failure is never silently swallowed.
+    """
+    if not user_detail_id:
+        return 0
+    try:
+        return int(API().RegisterFailedLoginAttempt(user_detail_id, MAX_LOGIN_ATTEMPTS) or 0)
+    except Exception:
+        logger.exception("Could not record the failed login for %r", user_detail_id)
+        return 0
+
+
+def _reset_failed_login(user_detail_id):
+    """Clear the wrong-password counter after a successful sign-in."""
+    if not user_detail_id:
+        return False
+    try:
+        return bool(API().ResetFailedLoginAttempt(user_detail_id))
+    except Exception:
+        logger.exception("Could not clear the failed-login counter for %r", user_detail_id)
+        return False
+
+
 
 # 1. DASHBOARD VIEW
 def dashboard(request):
@@ -65,8 +99,8 @@ def logout_view(request):
 # 2. LOGIN VIEW
 def login_view(request):
     if request.method == 'POST':
-        user_id = request.POST.get('user_id')
-        password = request.POST.get('password')
+        user_id = (request.POST.get('user_id') or '').strip()
+        password = request.POST.get('password') or ''
 
         with connection.cursor() as django_cursor:
             cursor = django_cursor.connection.cursor()
@@ -85,17 +119,36 @@ def login_view(request):
 
             if success.getvalue() == 1:
                 stored_hashed = hashed_pwd.getvalue()
+                account_status = (status.getvalue() or 'Enabled').strip().title()
+                previous_attempts = int(failed_attempts.getvalue() or 0)
+                detail_id = user_detail_id.getvalue()
+
                 if not stored_hashed or '$' not in stored_hashed:
+                    # Nothing usable is stored: do NOT count this as a wrong
+                    # password, the account was never set up with one.
                     messages.error(
                         request,
                         "The password stored for this account is invalid or incomplete. Please use 'Forgot password?' to reset it."
                     )
+                elif account_status != 'Enabled':
+                    # Disabled/Locked account: refuse the sign-in outright and
+                    # do not touch the counter, so the reason stays "disabled".
+                    messages.error(
+                        request,
+                        "Your account is currently %s. It is disabled automatically after "
+                        "%s wrong passwords. Please contact your Manager or Superadmin to "
+                        "re-enable it." % (account_status, MAX_LOGIN_ATTEMPTS)
+                    )
                 elif check_password(password, stored_hashed):
-                    request.session['JB_UserDetailID'] = user_detail_id.getvalue()
+                    request.session['JB_UserDetailID'] = detail_id
                     request.session['JB_UserID'] = user_id
+                    request.session['JB_Status'] = 'Enabled'
+
+                    # Good sign-in: clear the wrong-password counter.
+                    _reset_failed_login(detail_id)
 
                     # Load User Menu Permissions
-                    request.session['USER_MENUS'] = _load_user_menus(cursor, user_detail_id.getvalue())
+                    request.session['USER_MENUS'] = _load_user_menus(cursor, detail_id)
 
                     # Load basic profile (name + photo) for the topbar.
                     try:
@@ -104,14 +157,15 @@ def login_view(request):
                         image_path = cursor.var(str)
                         role_name = cursor.var(str)
                         cursor.callproc('SP_GET_USER_DETAILS', [
-                            user_detail_id.getvalue(), user_name, email,
+                            detail_id, user_name, email,
                             image_path, role_name, success
                         ])
                         request.session['JB_FullName'] = user_name.getvalue()
                         request.session['JB_ImagePath'] = image_path.getvalue()
-                        request.session['JB_RoleName'] = role_name.getvalue()
+                        request.session['JB_RoleName'] = (role_name.getvalue() or '').strip()
                         request.session['JB_Email'] = email.getvalue()
                     except Exception:
+                        logger.exception("SP_GET_USER_DETAILS failed for %r", detail_id)
                         request.session['JB_FullName'] = user_id
 
                     if is_first_login.getvalue() == 1:
@@ -131,9 +185,37 @@ def login_view(request):
                     request.session.pop('FORCE_PW_CHANGE', None)
                     return redirect('dashboard')
                 else:
-                    messages.error(request, "Invalid User ID or Password.")
+                    # Wrong password: count it, and lock the account once the
+                    # counter reaches MAX_LOGIN_ATTEMPTS.
+                    attempts = _register_failed_login(detail_id)
+                    if not attempts:
+                        # The counter could not be written - still tell the user
+                        # the truth rather than pretending the attempt was saved.
+                        logger.error(
+                            "Failed-login counter not persisted for %r (was %s)",
+                            user_id, previous_attempts,
+                        )
+                    if attempts >= MAX_LOGIN_ATTEMPTS:
+                        messages.error(
+                            request,
+                            "Invalid User ID or Password. Your account has been DISABLED after "
+                            "%s wrong attempts. Please contact your Manager or Superadmin to "
+                            "re-enable it." % MAX_LOGIN_ATTEMPTS
+                        )
+                    else:
+                        messages.error(
+                            request,
+                            "Invalid User ID or Password. %s attempt(s) left before your account "
+                            "is disabled." % (MAX_LOGIN_ATTEMPTS - attempts)
+                        )
             else:
-                messages.error(request, msg.getvalue() if msg.getvalue() else "Invalid Credentials or Account Locked.")
+                # Unknown user id, or the lookup itself failed. SP_AUTHENTICATE_USER
+                # answers 'Invalid User ID or Password.' for the no-data case, so its
+                # message is passed through verbatim when it is a real message.
+                reason = (msg.getvalue() or '').strip()
+                if not reason or 'ORA-' in reason:
+                    reason = "Invalid User ID or Password."
+                messages.error(request, reason)
 
     return render(request, 'login/login_register.html')
 
@@ -450,7 +532,6 @@ def unlock_user(request, user_id):
     hashed_pwd = make_password(temp_pwd)
 
     try:
-        from login.api import API
         result = API().UnlockUserByBankID(user_id, hashed_pwd) or {}
         success = result.get('success')
         user_email = result.get('user_email')
@@ -472,70 +553,153 @@ def unlock_user(request, user_id):
         messages.error(request, msg)
 
     next_page = request.GET.get('next')
-    if next_page not in ('user_unlock', 'manager_dashboard'):
+    if next_page not in ('disable_enable', 'manageuser', 'user_unlock', 'manager_dashboard'):
         next_page = 'manager_dashboard'
     return redirect(next_page)
 
 
-# 11b. USER UNLOCK PAGE (menu: User Unlock)
-#      Manageuser-style flow. The page submits the mobile number (POST field
-#      'mobileno', or the <str:mobileno> path arg, or ?mobileno=), then the
-#      view delegates to the custom API() class:
-#          GetUserByMobileNo / GetUserStatus
-#          GetUserStatusByStatusName / UpdateUserStatus
-#      The status-update form (btnupdateuser) is handled below.
-@permission_required_sp('user_unlock')
+# 11c. USER UNLOCK PAGE (menu: User Unlock)
+#      Deliberately open to EVERY account that holds the 'user_unlock' menu
+#      grant - hence permission_required_sp(..., any_role=True) and no role
+#      whitelist. Who receives that grant is decided on the Assign Menu
+#      screen.
+#
+#      The screen takes a mobile number and nothing else. Submitting it calls
+#      exactly one API method:
+#          API().UnlockUserByMobileNo(mobileno)
+#      which is the single signature the unlock API is expected to expose. A
+#      fresh temporary password is generated here and emailed to the account,
+#      so the unlock also hands out working credentials.
+@permission_required_sp('user_unlock', any_role=True)
 def user_unlock(request, mobileno=''):
-    from datetime import datetime
+    api = API()
 
-    curdatetime = datetime.now().strftime('%y-%b-%d')
+    mobileno = (mobileno or request.POST.get('mobileno')
+                or request.GET.get('mobileno') or '').strip()
     errormsg = ''
-    mobile = (mobileno or request.POST.get('mobileno') or request.GET.get('mobileno') or '').strip()
-    infos = []
-    userstatuslists = []
+    unlocked = None
 
-    try:
-        from login.api import API
-        api = API()
+    if request.method == 'POST' and request.POST.get('btnunlockuser'):
+        if not mobileno:
+            errormsg = "Please enter the mobile number of the account to unlock."
+        else:
+            temp_pwd = generate_random_password()
+            hashed_pwd = make_password(temp_pwd)
+            try:
+                result = api.UnlockUserByMobileNo(mobileno, hashed_pwd) or {}
+            except Exception as exc:
+                logger.exception("UnlockUserByMobileNo failed for %r", mobileno)
+                result = {'success': False, 'msg': "Unlock failed: %s" % exc}
 
-        infos = _normalize_user_infos(api.GetUserByMobileNo(mobile))
-        userstatuslists = _normalize_user_statuses(api.GetUserStatus())
-
-        if request.method == 'POST' and 'btnupdateuser' in request.POST:
-            lockCount = request.POST.get('txtlockCount')
-            statusname = request.POST.get('sltappUserStatus')
-            appuserstatusid = api.GetUserStatusByStatusName(statusname)
-            updatedBy = request.session.get('JB_BankID') or request.session.get('JB_UserID')
-            updatedDate = curdatetime
-            appuserinfoid = request.POST.get('txtappuserinfoid')
-            remarks = request.POST.get('txtremarks')
-
-            resultforpwdlock = api.UpdateUserStatus(appuserinfoid, appuserstatusid, updatedBy, remarks)
-
-            if resultforpwdlock:
-                insertuserlog(request, appuserinfoid, "User Status Change")
-                errormsg = 'Update Done Successfully.'
+            if result.get('success'):
+                target_id = result.get('userid') or ''
+                unlocked = {
+                    'userid': target_id,
+                    'email': result.get('user_email') or '',
+                    'msg': result.get('msg') or '',
+                }
+                # The unlock already happened; a failed mail must not undo it,
+                # so report it separately and show the operator the password.
+                if unlocked['email']:
+                    email_sent = dispatch_email(
+                        "Account Unlocked - New Temporary Credentials",
+                        f"Your account has been unlocked.\nUser ID: {target_id}\n"
+                        f"Temporary Password: {temp_pwd}\n\n"
+                        "Please log in and change your password immediately.",
+                        unlocked['email'],
+                    )
+                    unlocked['email_sent'] = email_sent
+                else:
+                    unlocked['email_sent'] = False
+                insertuserlog(request, get_session_user(request),
+                              "User Unlock by Mobile %s -> %s" % (mobileno, target_id))
             else:
-                errormsg = 'Update Not Done.'
-
-            return render(request, 'login/user_unlock.html', {
-                'errormsg': errormsg, 'infos': infos, 'mobileno': mobile,
-                'userstatuslists': userstatuslists,
-                'actor_role': request.session.get('JB_RoleName', ''),
-            })
-    except Exception as exc:
-        errormsg = str(exc)
+                errormsg = result.get('msg') or "Unlock failed."
 
     return render(request, 'login/user_unlock.html', {
-        'infos': infos, 'errormsg': errormsg, 'userstatuslists': userstatuslists,
-        'mobileno': mobile,
+        'mobileno': mobileno,
+        'errormsg': errormsg,
+        'unlocked': unlocked,
         'actor_role': request.session.get('JB_RoleName', ''),
     })
 
 
+# 11d. DISABLE / ENABLE PAGE (menu: Disable/Enable)
+#      This is the *separate* enable/disable logic the manager and superadmin
+#      use. Search a mobile number, then push the account to Enabled or
+#      Disabled. A disabled user cannot sign in (see login_view and
+#      UserSessionStateMiddleware).
+#
+#      Role policy (enforced in login/api.py::_enforce_status_policy and again
+#      by the Oracle procedure SP_SET_USER_STATUS):
+#          Superadmin -> enable/disable any manager or user.
+#          Manager    -> enable/disable a user only; never a superadmin,
+#                        a manager or a bank support account.
+@permission_required_sp('disable_enable')
+def disable_enable(request, mobileno=''):
+    api = API()
+    actor_id = get_session_user(request)
+    actor_role = request.session.get('JB_RoleName', '')
+
+    mobileno = (mobileno or request.POST.get('mobileno')
+                or request.GET.get('mobileno') or '').strip()
+    errormsg = ''
+    okmsg = ''
+    action_taken = None
+
+    try:
+        infos = _normalize_user_infos(api.GetUserByMobileNo(mobileno)) if mobileno else []
+        userstatuslists = _normalize_user_statuses(api.GetUserStatus())
+
+        if request.method == 'POST' and request.POST.get('btnupdateuser'):
+            target_id = (request.POST.get('txtappuserinfoid') or '').strip()
+            statusname = request.POST.get('sltappUserStatus') or ''
+            remarks = (request.POST.get('txtremarks') or '').strip()
+
+            try:
+                api.SetUserStatus(actor_id, target_id, statusname, remarks)
+            except ValueError as exc:
+                errormsg = str(exc)
+            except Exception as exc:
+                logger.exception("SetUserStatus failed for target %r", target_id)
+                errormsg = "Status update failed: %s" % exc
+            else:
+                action_taken = {'userdetailid': target_id, 'status': statusname}
+                okmsg = "%s is now %s." % (
+                    (request.POST.get('txtuserid') or 'The account').strip(),
+                    statusname.strip().title(),
+                )
+                insertuserlog(
+                    request, actor_id,
+                    "User Status Change -> %s" % statusname.strip().title(),
+                )
+                # Re-read so the table shows the committed state.
+                infos = _normalize_user_infos(api.GetUserByMobileNo(mobileno))
+    except Exception as exc:
+        logger.exception("disable_enable failed for %r", mobileno)
+        errormsg = str(exc)
+        infos, userstatuslists = [], []
+
+    return render(request, 'login/disable_enable.html', {
+        'infos': infos,
+        'errormsg': errormsg,
+        'okmsg': okmsg,
+        'action_taken': action_taken,
+        'userstatuslists': userstatuslists,
+        'mobileno': mobileno,
+        'actor_role': actor_role,
+    })
+
+
+# 11e. Legacy name kept so the old /user-unlock/ and /disable-enable/ links and
+#      any bookmarked URLs from before the split keep resolving.
+def manageuser(request, mobileno=''):
+    return redirect('disable_enable')
+
+
 def _normalize_user_infos(rows):
-    """Map whatever keys your API returns to the canonical keys used by
-    templates/login/user_unlock.html. Items that are not dicts are skipped."""
+    """Map whatever keys the API returns to the canonical keys used by
+    templates/login/disable_enable.html. Items that are not dicts are skipped."""
     aliases = {
         'appuserinfoid': ('appuserinfoid', 'userinfoid', 'id'),
         'userid': ('userid', 'user_id', 'username', 'loginid'),

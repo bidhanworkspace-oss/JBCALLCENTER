@@ -13,8 +13,19 @@ urlpatterns = [
     path('manager/dashboard/', views.manager_dashboard, name='manager_dashboard'),
     path('manager/approve/<int:reg_id>/', views.approve_user, name='approve_user'),
     path('manager/unlock/<str:user_id>/', views.unlock_user, name='unlock_user'),
+
+    # User Unlock: mobile number in, API.UnlockUserByMobileNo(mobileno) out.
+    # Open to every account holding the 'user_unlock' menu grant.
     path('user-unlock/', views.user_unlock, name='user_unlock'),
     path('user-unlock/<str:mobileno>/', views.user_unlock, name='user_unlock_by_mobile'),
+
+    # Disable/Enable: Superadmin any account, Manager user accounts only.
+    path('disable-enable/', views.disable_enable, name='disable_enable'),
+    path('disable-enable/<str:mobileno>/', views.disable_enable, name='disable_enable_by_mobile'),
+
+    # Legacy alias so stale bookmarks of the old manageuser page keep working.
+    path('manage-user/', views.manageuser, name='manageuser'),
+
     path('assign-menu/', views.assign_menu, name='assign_menu'),
     path('assign-role/', views.assign_role_legacy, name='assign_role'),
 
