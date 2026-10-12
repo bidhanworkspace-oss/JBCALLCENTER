@@ -1,15 +1,11 @@
 from django.shortcuts import render, redirect
-from django.db import connection
 from django.contrib import messages
 
+from login.api import API
 from login.decorators import permission_required_sp
 from login.utils import get_session_user, save_upload
 
 
-# ---------------------------------------------------------------------------
-# Ticket configuration (kept in Python — the DB only stores the numeric/string
-# values. All SQL lives inside stored procedures.)
-# ---------------------------------------------------------------------------
 TICKET_ISSUE_TYPES = [
     {'id': 1, 'name': 'New Registration'},
     {'id': 2, 'name': 'Unlock'},
@@ -30,12 +26,17 @@ TICKET_STATUSES = {
     'DENIED': 'Denied',
 }
 
-# Extra attachments on tickets: images or PDF, max 5 MB.
 TICKET_ALLOWED_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.pdf')
 TICKET_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-# 1. RAISE A TICKET
+def get_oracle_cursor():
+    """Return (connection, cursor) using the same method as the API class."""
+    conn = API._get_connection()
+    cursor = conn.cursor()
+    return conn, cursor
+
+
 @permission_required_sp('raise_ticket')
 def raise_ticket(request):
     if request.method == 'POST':
@@ -53,6 +54,7 @@ def raise_ticket(request):
             issue_type_id = int(issue_type_id or 0)
         except (TypeError, ValueError):
             issue_type_id = 0
+
         issue_type_name = next(
             (it['name'] for it in TICKET_ISSUE_TYPES if it['id'] == issue_type_id), ''
         )
@@ -69,6 +71,7 @@ def raise_ticket(request):
         if not (mobile_no or account_no):
             messages.error(request, "Provide at least the customer Mobile No or Account No.")
             valid = False
+
         if not valid:
             return render(request, 'ticket/raise_ticket.html', {
                 'issue_types': TICKET_ISSUE_TYPES,
@@ -76,8 +79,10 @@ def raise_ticket(request):
             })
 
         try:
-            attachment_path = save_upload(request, 'tickets', 'attachment',
-                                          TICKET_ALLOWED_EXTENSIONS, TICKET_MAX_UPLOAD_BYTES)
+            attachment_path = save_upload(
+                request, 'tickets', 'attachment',
+                TICKET_ALLOWED_EXTENSIONS, TICKET_MAX_UPLOAD_BYTES
+            )
         except ValueError as exc:
             messages.error(request, str(exc))
             return render(request, 'ticket/raise_ticket.html', {
@@ -85,8 +90,9 @@ def raise_ticket(request):
                 'priorities': TICKET_PRIORITIES,
             })
 
-        with connection.cursor() as django_cursor:
-            cursor = django_cursor.connection.cursor()
+        conn = None
+        try:
+            conn, cursor = get_oracle_cursor()
 
             ticket_id = cursor.var(int)
             ticket_ref = cursor.var(str)
@@ -100,10 +106,21 @@ def raise_ticket(request):
             ])
 
             if success.getvalue() == 1:
-                messages.success(request, f"Ticket {ticket_ref.getvalue()} raised successfully. Our team will respond shortly.")
+                messages.success(
+                    request,
+                    f"Ticket {ticket_ref.getvalue()} raised successfully. Our team will respond shortly."
+                )
                 return redirect('tickets')
             else:
                 messages.error(request, msg.getvalue())
+        except Exception:
+            messages.error(request, "Unable to raise the ticket right now. Please try again.")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     return render(request, 'ticket/raise_ticket.html', {
         'issue_types': TICKET_ISSUE_TYPES,
@@ -111,7 +128,6 @@ def raise_ticket(request):
     })
 
 
-# 2. TICKETS LIST (with Latest / High-priority filter)
 @permission_required_sp('tickets')
 def tickets_list(request):
     filter_mode = request.GET.get('filter', 'latest').strip().upper()
@@ -119,8 +135,9 @@ def tickets_list(request):
         filter_mode = 'LATEST'
 
     tickets = []
-    with connection.cursor() as django_cursor:
-        cursor = django_cursor.connection.cursor()
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
         tickets_cur = cursor.connection.cursor()
 
         cursor.callproc('SP_GET_TICKETS', [filter_mode, tickets_cur])
@@ -143,15 +160,21 @@ def tickets_list(request):
                 'open_days': row[11],
             })
         tickets_cur.close()
+    except Exception:
+        messages.error(request, "Unable to load tickets right now.")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return render(request, 'ticket/tickets.html', {
         'tickets': tickets,
         'filter_mode': filter_mode,
-        'status_labels': TICKET_STATUSES,
     })
 
 
-# 3. TICKET DETAIL + RESPONSE/SOLVE
 @permission_required_sp('tickets')
 def ticket_detail(request, ticket_id):
     user_detail_id = get_session_user(request)
@@ -170,8 +193,9 @@ def ticket_detail(request, ticket_id):
         if action not in ('SOLVED', 'DENIED', 'NOTE'):
             action = 'NOTE'
 
-        with connection.cursor() as django_cursor:
-            cursor = django_cursor.connection.cursor()
+        conn = None
+        try:
+            conn, cursor = get_oracle_cursor()
 
             success = cursor.var(int)
             msg = cursor.var(str)
@@ -187,16 +211,25 @@ def ticket_detail(request, ticket_id):
                     messages.success(request, f"Ticket marked as {action}.")
             else:
                 messages.error(request, msg.getvalue())
+        except Exception:
+            messages.error(request, "Unable to update the ticket right now.")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         return redirect('ticket_detail', ticket_id=ticket_id)
 
+    # GET request – load ticket + responses
     ticket = None
     responses = []
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
 
-    with connection.cursor() as django_cursor:
-        cursor = django_cursor.connection.cursor()
         ticket_cur = cursor.connection.cursor()
-
         cursor.callproc('SP_GET_TICKET_BY_ID', [str(ticket_id), ticket_cur])
 
         for row in ticket_cur:
@@ -219,7 +252,6 @@ def ticket_detail(request, ticket_id):
         ticket_cur.close()
 
         response_cur = cursor.connection.cursor()
-
         cursor.callproc('SP_GET_TICKET_RESPONSES', [str(ticket_id), response_cur])
 
         for row in response_cur:
@@ -230,6 +262,14 @@ def ticket_detail(request, ticket_id):
                 'created_at': row[3],
             })
         response_cur.close()
+    except Exception:
+        messages.error(request, "Unable to load ticket details.")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     if not ticket:
         messages.error(request, "Ticket not found.")
@@ -238,6 +278,5 @@ def ticket_detail(request, ticket_id):
     return render(request, 'ticket/ticket_detail.html', {
         'ticket': ticket,
         'responses': responses,
-        'status_labels': TICKET_STATUSES,
         'can_take_action': can_take_action,
     })

@@ -1,33 +1,7 @@
--- ===========================================================================
---  *** SUPERSEDED - DO NOT USE ***
---  This legacy patch has been folded into:
---    - JB_CALLCENTER_SETUP.sql      (brand-new install, no triggers/sequences)
---    - JB_CALLCENTER_MIGRATION_NO_TRIGGER_SEQUENCE.sql  (upgrade of existing DB)
---  Use one of those two files instead of this one.
--- ===========================================================================
---  JB CALL CENTER - BUG FIXES + TICKET MENUS (ORACLE)
--- ---------------------------------------------------------------------------
---  Fixes three issues:
---    1. SP_CREATE_MANAGER_BY_SUPERADMIN denied even real Superadmins because
---       the role is stored as 'Superadmin' (mixed case) but the procedure
---       compared against UPPERCASE 'SUPERADMIN'. Oracle compares VARCHAR2
---       case-sensitively, so the check always failed with
---       "Access Denied: Only Superadmin can create Manager accounts."
---    2. SP_APPROVE_REGISTRATION had the same case-sensitive role check and
---       also blocked Managers when approving registrations.
---    3. SP_GET_ACTIVE_USERS listed the Superadmin account in the Manager
---       dashboard; Superadmin is now excluded.
---  Plus: registers the ticket menu names (Raise Ticket, Tickets) and grants
---  them to every role (idempotent - safe to re-run).
---
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
--- ===========================================================================
+
 WHENEVER SQLERROR CONTINUE
 /
 
--- ---------------------------------------------------------------------------
--- 1. FIX SP_CREATE_MANAGER_BY_SUPERADMIN (case-insensitive role check)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     p_superadmin_user_id IN NUMBER,
     p_fullname IN VARCHAR2,
@@ -79,9 +53,6 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 2. FIX SP_APPROVE_REGISTRATION (case-insensitive role check)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_APPROVE_REGISTRATION (
     p_reg_id IN NUMBER,
     p_temp_password IN VARCHAR2,
@@ -145,9 +116,6 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 3. FIX SP_GET_ACTIVE_USERS (hide Superadmin from the Manager dashboard)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_GET_ACTIVE_USERS (
     p_out_cursor OUT SYS_REFCURSOR
 ) AS
@@ -169,11 +137,6 @@ BEGIN
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4. REGISTER TICKET MENU NAMES (idempotent)
---    Adds 'Raise Ticket' and 'Tickets' to SYSTEM_MENU if missing, then grants
---    every menu to Superadmin / Manager / User.
--- ---------------------------------------------------------------------------
 DECLARE
     v_mid NUMBER;
 BEGIN
@@ -217,8 +180,3 @@ BEGIN
 END;
 /
 
--- ===========================================================================
---  Verify afterwards:
---    SELECT object_name, object_type FROM user_objects WHERE status = 'INVALID';
---    Login as the Superadmin and create a Manager - it should now succeed.
--- ===========================================================================

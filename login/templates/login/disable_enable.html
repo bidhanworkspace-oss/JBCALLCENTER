@@ -81,7 +81,6 @@
             <th>User ID</th>
             <th>Full Name</th>
             <th>Mobile</th>
-            <th>Email</th>
             <th>Role</th>
             <th>Current Status</th>
             <th>Failed Logins</th>
@@ -94,7 +93,6 @@
             <td class="strong code">{{ u.userid|default:'-' }}</td>
             <td>{{ u.fullname|default:'-' }}</td>
             <td class="num">{{ u.mobile|default:'-' }}</td>
-            <td class="muted">{{ u.email|default:'-' }}</td>
             <td><span class="badge badge-info">{{ u.role_name|default:'No Role' }}</span></td>
             <td><span class="badge {% if u.status and u.status|lower != 'enabled' %}badge-danger{% else %}badge-good{% endif %}">{{ u.status|default:'-' }}</span></td>
             <td><span class="num">{{ u.failed_attempts|default:0 }}</span></td>

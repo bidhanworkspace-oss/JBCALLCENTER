@@ -1,0 +1,37 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jbcallcenter:latest
+    container_name: jbcallcenter
+    restart: always
+    ports:
+      - "16136:16136"
+    env_file:
+      - .env
+
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      MEDIA_ROOT: /app/media
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost,callcenter.jb.com.bd}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      DB_CALL_TIMEOUT: ${DB_CALL_TIMEOUT:-30}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
+      EJANATA_APILINK: ${EJANATA_APILINK:-aHR0cDovL2liYW5raW5ndWF0LmpiLmNvbS5iZDo1MDQw}
+      #SECRET_KEY :  ${4u1u!1qno6nhz6#e3dyq(^v3om1og1@eqj%j@p-a1vow)yl=hz}
+      # Optional API overrides (uncomment / set in .env to override settings.py defaults)
+      # MAIL_API_APILINK: ${MAIL_API_APILINK}
+      # EJANATA_APILINK: ${EJANATA_APILINK}
+      # EJANATA_ACC_STATEMENT_ENDPOINT: ${EJANATA_ACC_STATEMENT_ENDPOINT}
+    volumes:
+      - media_data:/app/media
+    networks:
+      - jb_network
+
+volumes:
+  media_data:
+
+networks:
+  jb_network:
+    driver: bridge

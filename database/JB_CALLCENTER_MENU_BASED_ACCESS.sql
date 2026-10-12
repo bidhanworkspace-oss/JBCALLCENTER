@@ -1,52 +1,52 @@
--- ===========================================================================
---  *** SUPERSEDED - DO NOT USE ***
---  This legacy patch has been folded into:
---    - JB_CALLCENTER_SETUP.sql      (brand-new install, no triggers/sequences)
---    - JB_CALLCENTER_MIGRATION_NO_TRIGGER_SEQUENCE.sql  (upgrade of existing DB)
---  Use one of those two files instead of this one.
--- ===========================================================================
---  JB CALL CENTER - MENU-BASED ACCESS PERMISSIONS
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---  Idempotent - safe to re-run any number of times.
---
---  WHAT THIS SCRIPT DOES
---  ----------------------------------------------------------------------
---  1. Creates USER_MENU_ASSIGNMENT - the per-user menu table. Access is now
---     granted directly to each user (menu-based), instead of through roles.
---     ROLE_MENU_PERMISSION is retained only as a one-time migration source.
---
---  2. Adds the 'Bank Support' role. Only users whose ROLE_NAME is
---     'Bank Support' can take action (solve / deny / note) on tickets.
---     The role itself can only be assigned by the Superadmin.
---
---  3. Migrates every existing user's current role-based menus into their
---     personal USER_MENU_ASSIGNMENT rows, so nobody loses access.
---
---  4. Renames the old 'Assign Role' menu to 'Assign Menu' (assign_menu).
---
---  5. Replaces the access SPs so they read per-user assignments:
---       SP_GET_USER_MENUS          (sidebar - per-user rows)
---       SP_CHECK_USER_MENU_ACCESS  (per-user rows)
---       SP_APPROVE_REGISTRATION    (new users get ONLY Dashboard + Change Password)
---       SP_CREATE_MANAGER_BY_SUPERADMIN (new managers get the manager menu set)
---       SP_RESPOND_TICKET          (only Bank Support may respond)
---
---  6. Creates the Assign Menu panel SPs:
---       SP_GET_ASSIGNABLE_MENUS    (menus the actor may grant = his own menus)
---       SP_GET_MENU_ASSIGN_USERS   (users the actor may manage)
---       SP_SET_USER_MENU_ACCESS    (assign / remove a menu for a user)
---       SP_ASSIGN_BANK_SUPPORT_ROLE (Superadmin-only Bank Support role toggle)
---
---  7. Drops the obsolete role-assignment procedures.
--- ===========================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ===========================================================================
--- 1. USER_MENU_ASSIGNMENT TABLE
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -64,9 +64,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 2. BANK SUPPORT ROLE
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -79,9 +79,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 3. MIGRATE EXISTING ROLE-BASED MENUS INTO PER-USER ASSIGNMENTS
--- ===========================================================================
+
+
+
 INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
 SELECT DISTINCT u.USERDETAILID, rmp.MENU_ID, NULL, CURRENT_TIMESTAMP
   FROM USERDETAIL u
@@ -92,7 +92,7 @@ SELECT DISTINCT u.USERDETAILID, rmp.MENU_ID, NULL, CURRENT_TIMESTAMP
  );
 COMMIT;
 
--- Superadmin always holds every menu (in case a menu was added without a grant).
+
 INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
 SELECT u.USERDETAILID, m.MENU_ID, NULL, CURRENT_TIMESTAMP
   FROM USERDETAIL u
@@ -105,9 +105,9 @@ SELECT u.USERDETAILID, m.MENU_ID, NULL, CURRENT_TIMESTAMP
    );
 COMMIT;
 
--- ===========================================================================
--- 4. RENAME 'ASSIGN ROLE' MENU -> 'ASSIGN MENU'
--- ===========================================================================
+
+
+
 UPDATE SYSTEM_MENU
    SET MENU_TITLE = 'Assign Menu', URL_NAME = 'assign_menu'
  WHERE URL_NAME = 'assign_role';
@@ -124,7 +124,7 @@ BEGIN
             VALUES ('Assign Menu', 'assign_menu', NULL, 'bi-person-badge', 4)
             RETURNING MENU_ID INTO v_mid;
 
-            -- Give the brand-new menu to Superadmin + existing Managers.
+
             INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
             SELECT u.USERDETAILID, v_mid, NULL, CURRENT_TIMESTAMP
               FROM USERDETAIL u
@@ -139,9 +139,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 5a. SP_GET_USER_MENUS - PER-USER (sidebar)
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_USER_MENUS (
     p_user_id      IN  NUMBER,
     p_menu_cursor  OUT SYS_REFCURSOR
@@ -160,9 +160,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 5b. SP_CHECK_USER_MENU_ACCESS - PER-USER
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_CHECK_USER_MENU_ACCESS (
     p_user_id    IN NUMBER,
     p_url_name   IN VARCHAR2,
@@ -187,9 +187,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 5c. SP_APPROVE_REGISTRATION - NEW USER GETS ONLY DASHBOARD + CHANGE PASSWORD
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_APPROVE_REGISTRATION (
     p_reg_id IN NUMBER,
     p_temp_password IN VARCHAR2,
@@ -239,8 +239,8 @@ BEGIN
         p_manager_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
-    -- Default menu grants: a newly approved user starts with ONLY
-    -- Dashboard + Change Password. More menus are added via Assign Menu.
+
+
     FOR mc IN (
         SELECT MENU_ID FROM SYSTEM_MENU
         WHERE URL_NAME IN ('dashboard', 'change_password')
@@ -264,9 +264,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 5d. SP_CREATE_MANAGER_BY_SUPERADMIN - NEW MANAGER GETS THE MANAGER MENU SET
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     p_superadmin_user_id IN NUMBER,
     p_fullname IN VARCHAR2,
@@ -306,7 +306,7 @@ BEGIN
         v_role_id, 1, 'Enabled', p_superadmin_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
-    -- Standard manager menu set (fine-tuned later via Assign Menu).
+
     FOR mc IN (
         SELECT MENU_ID FROM SYSTEM_MENU
         WHERE URL_NAME IN (
@@ -332,9 +332,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 5e. SP_RESPOND_TICKET - ONLY BANK SUPPORT MAY TAKE ACTION
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_RESPOND_TICKET (
     p_ticket_id         IN NUMBER,
     p_responder_user_id IN NUMBER,
@@ -349,7 +349,7 @@ CREATE OR REPLACE PROCEDURE SP_RESPOND_TICKET (
 BEGIN
     o_success := 0;
 
-    -- Bank Support gate
+
     SELECT UPPER(NVL(r.ROLE_NAME, ''))
       INTO v_responder_role
       FROM USERDETAIL u
@@ -422,10 +422,10 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 6a. SP_GET_ASSIGNABLE_MENUS - MENUS THE ACTOR MAY GRANT (HIS OWN TOP-LEVEL)
--- Column order: menu_id, menu_title, url_name, icon_class
--- ===========================================================================
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_ASSIGNABLE_MENUS (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -444,13 +444,13 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 6b. SP_GET_MENU_ASSIGN_USERS - USERS THE ACTOR MAY MANAGE
---      Superadmin : every user except himself (Manager / User / Bank Support)
---      Manager    : regular 'User' accounts only (never Support / Manager / Superadmin)
--- Columns: bank_id, user_id, fullname, email, status, role_name, role_id,
---          menu_ids (csv), menu_titles (pipe-separated)
--- ===========================================================================
+
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_MENU_ASSIGN_USERS (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -540,9 +540,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 6c. SP_SET_USER_MENU_ACCESS - ASSIGN / REMOVE A MENU FOR A USER
--- ===========================================================================
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_actor_user_id  IN NUMBER,
     p_target_bank_id IN VARCHAR2,
@@ -560,7 +560,7 @@ CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
 BEGIN
     p_success := 0;
 
-    -- actor identity
+
     SELECT UPPER(NVL(r.ROLE_NAME, ''))
       INTO v_actor_role
       FROM USERDETAIL u
@@ -572,7 +572,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- target
+
     BEGIN
         SELECT u.USERDETAILID, UPPER(NVL(r.ROLE_NAME, ''))
           INTO v_target_id, v_target_role
@@ -590,18 +590,18 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Manager may only manage regular Users
+
     IF v_actor_role = 'MANAGER' AND v_target_role <> 'USER' THEN
         p_msg := 'Access Denied: Managers can only assign menus to regular users.';
         RETURN;
     END IF;
 
-    -- menu must exist
+
     SELECT MENU_TITLE INTO v_menu_title
       FROM SYSTEM_MENU
      WHERE MENU_ID = p_menu_id;
 
-    -- actor must already hold the menu (assignable pool = the actor's own menus)
+
     SELECT COUNT(1) INTO v_cnt
       FROM USER_MENU_ASSIGNMENT
      WHERE USERDETAILID = p_actor_user_id AND MENU_ID = p_menu_id;
@@ -645,11 +645,11 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 6d. SP_ASSIGN_BANK_SUPPORT_ROLE - SUPERADMIN-ONLY TOGGLE
---      p_enable = 1 -> make the user Bank Support (from a regular User)
---      p_enable = 0 -> revert them to a regular User
--- ===========================================================================
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_ASSIGN_BANK_SUPPORT_ROLE (
     p_actor_user_id  IN NUMBER,
     p_target_bank_id IN VARCHAR2,
@@ -726,9 +726,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 7. DROP OBSOLETE ROLE-ASSIGNMENT PROCEDURES
--- ===========================================================================
+
+
+
 BEGIN
     EXECUTE IMMEDIATE 'DROP PROCEDURE SP_GET_ASSIGNABLE_ROLES';
 EXCEPTION WHEN OTHERS THEN NULL;
@@ -750,9 +750,8 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
--- ===========================================================================
---  VERIFY AFTERWARDS
---   SELECT object_name, object_type FROM user_objects WHERE status = 'INVALID';
---   Users must RE-LOGIN (or change password) to pick up the new menu assignments.
---   Superadmin: use Assign Menu to grant menus and toggle Bank Support users.
--- ===========================================================================
+
+
+
+
+

@@ -1,56 +1,7 @@
--- ===========================================================================
---  *** SUPERSEDED - DO NOT USE ***
---  This legacy patch has been folded into:
---    - JB_CALLCENTER_SETUP.sql      (brand-new install, no triggers/sequences)
---    - JB_CALLCENTER_MIGRATION_NO_TRIGGER_SEQUENCE.sql  (upgrade of existing DB)
---  Use one of those two files instead of this one.
--- ===========================================================================
---  JB CALL CENTER - ASSIGN ROLE DRAG & DROP PANEL + ADMIN APPROVAL ACCESS FIX
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---  Idempotent - safe to re-run any number of times.
---
---  WHAT THIS SCRIPT DOES
---  ----------------------------------------------------------------------
---  1. Registers every SYSTEM_MENU permission row required by the sidebar and
---     by the SP_CHECK_USER_MENU_ACCESS auth decorator (visible rows for the
---     sidebar, hidden URL-only permission children for actions such as
---     approve_user / unlock_user / user_unlock / assign_role).  This is what
---     fixes the current bug where Superadmin and Manager get
---         "Access Denied: You do not have permission to view this section."
---     on the Pending Registration / Approve / Unlock / Assign Role pages.
---
---  2. Grants those menus idempotently:
---       Superadmin (1) : EVERY menu
---       Manager    (2) : manager_dashboard, pending_registration, audit_trail,
---                        user_unlock, assign_role, approve_user, unlock_user,
---                        dashboard, change_password, raise_ticket, tickets
---       User       (3) : dashboard, change_password, raise_ticket, tickets
---       (User is explicitly locked OUT of every admin menu.)
---
---  3. Hardens SP_CHECK_USER_MENU_ACCESS to be case / whitespace tolerant so a
---     logged-in session can never be wrongly denied because of URL_NAME casing
---     (the exact cause of the "you do not have access" report).
---
---  4. Adds the DB side required by the new drag & drop Assign Role panel:
---       SP_GET_ASSIGNABLE_ROLES(p_actor_user_id, o_cursor)
---         - Superadmin -> ALL roles.
---         - Manager    -> only roles whose menu-permission set is a SUBSET of
---                         the Manager's OWN permission set (a Manager may only
---                         assign a role whose permissions he himself has).
---       SP_GET_USERS_FOR_ROLE_ASSIGN  (with actual notification to the target)
---       SP_ASSIGN_USER_ROLE           (DB-side hierarchy enforcement:
---                         Manager can never grant SUPERADMIN or MANAGER roles,
---                         and can only grant roles whose permission set is a
---                         subset of his own -- verified inside the procedure).
--- ===========================================================================
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ===========================================================================
--- 1 + 2. MENUS + IDEMPOTENT GRANTS
--- ===========================================================================
 DECLARE
     v_mid          NUMBER;
     v_mgr_mid      NUMBER;
@@ -58,7 +9,7 @@ DECLARE
     v_m2           NUMBER;
     v_m3           NUMBER;
 BEGIN
-    -- 1a. Manager Dashboard (visible sidebar)
+
     BEGIN
         SELECT MENU_ID INTO v_mgr_mid FROM SYSTEM_MENU WHERE URL_NAME = 'manager_dashboard';
     EXCEPTION
@@ -68,7 +19,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mgr_mid;
     END;
 
-    -- 1b. Pending Registration (visible sidebar)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'pending_registration';
     EXCEPTION
@@ -78,7 +28,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- 1c. User Unlock (visible sidebar)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'user_unlock';
     EXCEPTION
@@ -88,7 +37,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- 1d. Assign Role (visible sidebar)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'assign_role';
     EXCEPTION
@@ -98,8 +46,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- 1e. Hidden action permissions (children of Manager Dashboard, never
-    --     rendered by the sidebar but required by SP_CHECK_USER_MENU_ACCESS)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'approve_user';
     EXCEPTION
@@ -127,17 +73,11 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- ============================
-    -- 2. IDEMPOTENT GRANTS
-    -- ============================
-
-    -- Superadmin (1): every menu
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 1, m.MENU_ID FROM SYSTEM_MENU m
          WHERE NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                            WHERE rmp.ROLE_ID = 1 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Manager (2): admin + user menus (includes the hidden action perms)
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 2, m.MENU_ID FROM SYSTEM_MENU m
          WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
@@ -147,8 +87,6 @@ BEGIN
            AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                            WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- User (3): NON-admin menus only - and remove any admin menu accidentally
-    -- granted before (defense in depth: a User can never reach admin pages).
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 3, m.MENU_ID FROM SYSTEM_MENU m
          WHERE m.URL_NAME IN ('dashboard','change_password','raise_ticket','tickets')
@@ -166,9 +104,6 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 3. SP_CHECK_USER_MENU_ACCESS - CASE / WHITESPACE TOLERANT
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_CHECK_USER_MENU_ACCESS (
     p_user_id    IN NUMBER,
     p_url_name   IN VARCHAR2,
@@ -194,12 +129,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 4a. SP_GET_ASSIGNABLE_ROLES - hierarchy aware
---     Superadmin -> all roles; Manager -> roles whose permission set is a
---     subset of the Manager's own.  (Makes the drag & drop panel show only
---     the roles the operator is ALLOWED to grant.)
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_GET_ASSIGNABLE_ROLES (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -247,11 +176,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 4b. SP_GET_USERS_FOR_ROLE_ASSIGN - with target notification
---     Superadmin -> every user; Manager -> every user except Superadmins
---     (managers may never touch a Superadmin account).
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_GET_USERS_FOR_ROLE_ASSIGN (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -314,9 +238,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 4c. SP_ASSIGN_USER_ROLE - DB-side hierarchy enforcement + notification
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_ASSIGN_USER_ROLE (
     p_actor_user_id    IN NUMBER,
     p_target_bank_id   IN VARCHAR2,
@@ -332,7 +253,6 @@ CREATE OR REPLACE PROCEDURE SP_ASSIGN_USER_ROLE (
 BEGIN
     p_success := 0;
 
-    -- 1. actor identity + role
     SELECT UPPER(NVL(r.ROLE_NAME, '')), NVL(u.ROLE_ID, 0)
       INTO v_actor_role, v_actor_role_id
       FROM USERDETAIL u
@@ -344,7 +264,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- 2. target
     BEGIN
         SELECT u.USERDETAILID, UPPER(NVL(r.ROLE_NAME, ''))
           INTO v_target_user_id, v_target_role
@@ -362,7 +281,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- 3. new role name (if assigning, not removing)
     BEGIN
         IF p_role_id IS NOT NULL THEN
             SELECT ROLE_NAME INTO v_new_role_name FROM SYSTEM_ROLE WHERE ROLE_ID = p_role_id;
@@ -373,19 +291,18 @@ BEGIN
             RETURN;
     END;
 
-    -- 4. hierarchy rules
     IF v_actor_role = 'MANAGER' THEN
-        -- Manager can never act on a Superadmin or on another Manager
+
         IF v_target_role IN ('SUPERADMIN', 'MANAGER') THEN
             p_msg := 'Access Denied: Managers can only assign roles to regular users.';
             RETURN;
         END IF;
-        -- Manager can never grant SUPERADMIN or MANAGER
+
         IF v_new_role_name IS NOT NULL AND UPPER(v_new_role_name) IN ('SUPERADMIN', 'MANAGER') THEN
             p_msg := 'Access Denied: Managers cannot grant the Superadmin or Manager role.';
             RETURN;
         END IF;
-        -- Manager can only grant a role whose permission set is a subset of his own
+
         IF v_new_role_name IS NOT NULL THEN
             DECLARE
                 v_extra NUMBER := 0;
@@ -405,7 +322,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- 5. apply
     UPDATE USERDETAIL SET ROLE_ID = p_role_id WHERE USERDETAILID = v_target_user_id;
 
     IF p_role_id IS NULL THEN
@@ -422,11 +338,3 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
---  VERIFY AFTERWARDS
---   SELECT URL_NAME FROM SYSTEM_MENU ORDER BY DISPLAY_ORDER;
---   SELECT r.ROLE_NAME, m.URL_NAME FROM ROLE_MENU_PERMISSION rmp
---     JOIN SYSTEM_ROLE r ON r.ROLE_ID = rmp.ROLE_ID
---     JOIN SYSTEM_MENU m   ON m.MENU_ID = rmp.MENU_ID
---    ORDER BY r.ROLE_ID, m.DISPLAY_ORDER;
--- ===========================================================================

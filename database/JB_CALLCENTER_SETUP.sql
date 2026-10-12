@@ -1,53 +1,53 @@
--- ===========================================================================
---  JB CALL CENTER PORTAL - COMPLETE ORACLE SETUP SCRIPT (fresh install)
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---    Host     : 172.18.18.166
---    Port     : 1521
---    Service  : JBPAY
---    User     : JBCALLCENTER
---    Password : Jb1234*
---
---  THIS BUILD USES **NO TRIGGERS AND NO SEQUENCES**.
---  All generated ids come from FN_GET_NEXT_ID() (a plain counter table +
---  function). The identity columns below (GENERATED ALWAYS AS IDENTITY) are
---  Oracle's built-in feature and need no user sequence/trigger.
---
---  WHAT THIS CREATES
---    Tables    : SYSTEM_ROLE, SYSTEM_MENU, ROLE_MENU_PERMISSION, USERDETAIL,
---                USER_REGISTRATION, USER_ACTION_AUDIT_LOG,
---                JB_APP_COUNTER, JB_TICKETS, JB_TICKET_RESPONSES,
---                USER_MENU_ASSIGNMENT
---    Functions : FN_GET_NEXT_ID (sequence replacement)
---    Seed      : 4 roles (Superadmin/Manager/User/Bank Support), the menus +
---                grants, default Superadmin login SA001 / Admin@123
---    Procedures (all data access is via these; Django views contain NO SQL):
---       Login/Profile : SP_AUTHENTICATE_USER, SP_GET_USER_MENUS,
---                       SP_CHECK_USER_MENU_ACCESS, SP_GET_USER_DETAILS
---       Registration  : SP_SUBMIT_REGISTRATION, SP_GET_PENDING_REGISTRATIONS,
---                       SP_APPROVE_REGISTRATION
---       Manager       : SP_CREATE_MANAGER_BY_SUPERADMIN, SP_UNLOCK_USER_BY_MANAGER,
---                       SP_CHANGE_PASSWORD, SP_CHANGE_USER_PASSWORD,
---                       SP_FORGOT_PASSWORD_RESET
---       Dashboard     : SP_GET_ACTIVE_USERS, SP_GET_LOCKED_USERS
---       User Unlock   : SP_GET_USER_BY_MOBILE, SP_UNLOCK_USER_BY_MOBILE
---       Audit         : SP_RECORD_AUDIT_LOG, SP_GET_AUDIT_LOGS
---       Tickets       : SP_RAISE_TICKET, SP_GET_TICKETS, SP_GET_TICKET_BY_ID,
---                       SP_GET_TICKET_RESPONSES, SP_RESPOND_TICKET
---       Menu access   : SP_GET_ASSIGNABLE_MENUS, SP_GET_MENU_ASSIGN_USERS,
---                       SP_SET_USER_MENU_ACCESS, SP_ASSIGN_BANK_SUPPORT_ROLE
---
---  NOTE: the app needs a 12c+ Oracle (uses GENERATED ALWAYS AS IDENTITY).
---  After running, verify nothing is invalid:
---    SELECT object_name, object_type FROM user_objects WHERE status = 'INVALID';
--- ===========================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ===========================================================================
--- 1. BASE TABLES
--- ===========================================================================
+
+
+
 
 CREATE TABLE SYSTEM_ROLE (
     ROLE_ID     NUMBER GENERATED ALWAYS AS IDENTITY,
@@ -81,9 +81,10 @@ CREATE TABLE USERDETAIL (
     USERDETAILID        NUMBER GENERATED ALWAYS AS IDENTITY,
     USERID              VARCHAR2(30),
     FULLNAME            VARCHAR2(100),
-    MOBILE_NO           VARCHAR2(20),
-    EMAIL               VARCHAR2(100),
+    MOBILE_NO           VARCHAR2(20) NOT NULL,
+    EMAIL               VARCHAR2(100) NOT NULL,
     NID                 VARCHAR2(30),
+    OFFICE_ID           VARCHAR2(30),
     ATTACHMENT_PATH     VARCHAR2(255),
     USERPASSWORD        VARCHAR2(255),
     IS_FIRST_LOGIN      NUMBER DEFAULT 1,
@@ -103,14 +104,20 @@ CREATE TABLE USERDETAIL (
 CREATE TABLE USER_REGISTRATION (
     REGISTRATION_ID NUMBER GENERATED ALWAYS AS IDENTITY,
     FULLNAME        VARCHAR2(100),
-    MOBILE_NO       VARCHAR2(20),
-    EMAIL           VARCHAR2(100),
+    MOBILE_NO       VARCHAR2(20) NOT NULL,
+    EMAIL           VARCHAR2(100) NOT NULL,
     NID             VARCHAR2(30),
+    OFFICE_ID       VARCHAR2(30),
     ATTACHMENT_PATH VARCHAR2(255),
     STATUS          VARCHAR2(20) DEFAULT 'PENDING',
     SUBMITTED_AT    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT PK_USER_REGISTRATION PRIMARY KEY (REGISTRATION_ID)
 );
+
+CREATE UNIQUE INDEX UQ_USERDETAIL_EMAIL ON USERDETAIL (LOWER(TRIM(EMAIL)));
+CREATE UNIQUE INDEX UQ_USERDETAIL_MOBILE ON USERDETAIL (TRIM(MOBILE_NO));
+CREATE UNIQUE INDEX UQ_USER_REG_EMAIL ON USER_REGISTRATION (LOWER(TRIM(EMAIL)));
+CREATE UNIQUE INDEX UQ_USER_REG_MOBILE ON USER_REGISTRATION (TRIM(MOBILE_NO));
 
 CREATE TABLE USER_ACTION_AUDIT_LOG (
     LOG_ID          NUMBER GENERATED ALWAYS AS IDENTITY,
@@ -127,9 +134,9 @@ CREATE TABLE USER_ACTION_AUDIT_LOG (
     CONSTRAINT PK_USER_ACTION_AUDIT_LOG PRIMARY KEY (LOG_ID)
 );
 
--- ===========================================================================
--- 2. TICKET TABLES
--- ===========================================================================
+
+
+
 
 CREATE TABLE JB_TICKETS (
     TICKET_ID          NUMBER CONSTRAINT PK_JB_TICKETS PRIMARY KEY,
@@ -171,9 +178,9 @@ CREATE TABLE JB_TICKET_RESPONSES (
 
 CREATE INDEX IDX_JB_RESP_TICKET ON JB_TICKET_RESPONSES (TICKET_ID);
 
--- ===========================================================================
--- 2b. PER-USER MENU ASSIGNMENTS
--- ===========================================================================
+
+
+
 CREATE TABLE USER_MENU_ASSIGNMENT (
     USERDETAILID      NUMBER NOT NULL,
     MENU_ID           NUMBER NOT NULL,
@@ -184,9 +191,9 @@ CREATE TABLE USER_MENU_ASSIGNMENT (
 
 CREATE INDEX IDX_UMA_MENU ON USER_MENU_ASSIGNMENT (MENU_ID);
 
--- ===========================================================================
--- 3. ID COUNTERS (REPLACES SEQUENCES - no CREATE SEQUENCE, no trigger)
--- ===========================================================================
+
+
+
 
 CREATE TABLE JB_APP_COUNTER (
     COUNTER_NAME VARCHAR2(60) CONSTRAINT PK_JB_APP_COUNTER PRIMARY KEY,
@@ -224,21 +231,21 @@ EXCEPTION
 END;
 /
 
--- Seed the counters (start at 1; SA001 does not consume a counter).
+
 INSERT INTO JB_APP_COUNTER (COUNTER_NAME, NEXT_VALUE) VALUES ('JB_TICKETS_SEQ', 1);
 INSERT INTO JB_APP_COUNTER (COUNTER_NAME, NEXT_VALUE) VALUES ('JB_TICKET_RESPONSES_SEQ', 1);
 INSERT INTO JB_APP_COUNTER (COUNTER_NAME, NEXT_VALUE) VALUES ('BANK_USER_SEQ', 1);
 INSERT INTO JB_APP_COUNTER (COUNTER_NAME, NEXT_VALUE) VALUES ('MANAGER_USER_SEQ', 1);
 COMMIT;
 
--- ===========================================================================
--- 4. SEED DATA (roles, menus, grants, default Superadmin)
--- ===========================================================================
 
-INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Superadmin', 'Full system access.');   -- ROLE_ID 1
-INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Manager',    'Manages users and tickets.'); -- ROLE_ID 2
-INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('User',       'Bank user.');             -- ROLE_ID 3
-INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Bank Support','Resolves and takes action on support tickets.'); -- ROLE_ID 4
+
+
+
+INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Superadmin', 'Full system access.');
+INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Manager',    'Manages users and tickets.');
+INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('User',       'Bank user.');
+INSERT INTO SYSTEM_ROLE (ROLE_NAME, DESCRIPTION) VALUES ('Bank Support','Resolves and takes action on support tickets.');
 
 INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('Dashboard',        'dashboard',            'bi-speedometer2',       1);
 INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, ICON_CLASS, DISPLAY_ORDER) VALUES ('Manager Dashboard','manager_dashboard',    'bi-person-gear',       2);
@@ -258,23 +265,23 @@ DECLARE
 BEGIN
     SELECT MENU_ID INTO v_mgr_mid FROM SYSTEM_MENU WHERE URL_NAME = 'manager_dashboard';
 
-    -- Hidden action permissions (children of Manager Dashboard, never
-    -- rendered by the sidebar but required by SP_CHECK_USER_MENU_ACCESS).
+
+
     INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, PARENT_ID, ICON_CLASS, DISPLAY_ORDER)
     VALUES ('Approve User Action', 'approve_user', v_mgr_mid, NULL, 20);
     INSERT INTO SYSTEM_MENU (MENU_TITLE, URL_NAME, PARENT_ID, ICON_CLASS, DISPLAY_ORDER)
     VALUES ('Unlock User Action', 'unlock_user', v_mgr_mid, NULL, 21);
 
-    -- Superadmin (1) gets every menu
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 1, MENU_ID FROM SYSTEM_MENU
         WHERE NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 1 AND rmp.MENU_ID = SYSTEM_MENU.MENU_ID);
 
-    -- Manager (2): management + user menus.
-    -- 'user_unlock' and 'disable_enable' are BOTH granted: Unlock stays open
-    -- to every role that holds the menu, and Disable/Enable is the separate
-    -- screen for turning an account on or off.
+
+
+
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 2, MENU_ID FROM SYSTEM_MENU m
     WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
@@ -284,21 +291,21 @@ BEGIN
                       WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
 
 
-    -- User (3): non-admin menus only
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 3, MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','change_password','raise_ticket','tickets')
           AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 3 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Bank Support (4): dashboard, tickets
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 4, MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','tickets','raise_ticket','change_password')
           AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 4 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Default Superadmin (Django PBKDF2 hash for password: Admin@123)
+
     INSERT INTO USERDETAIL (
         USERID, FULLNAME, MOBILE_NO, EMAIL, USERPASSWORD,
         IS_FIRST_LOGIN, USERSTATUS, FAILED_ATTEMPTS, ROLE_ID, APPROVED_AT
@@ -308,7 +315,7 @@ BEGIN
         0, 'Enabled', 0, 1, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_mid;
 
-    -- Superadmin holds every menu in USER_MENU_ASSIGNMENT too.
+
     INSERT INTO USER_MENU_ASSIGNMENT (USERDETAILID, MENU_ID, ASSIGNED_BY_USER_ID, ASSIGNED_AT)
         SELECT (SELECT USERDETAILID FROM USERDETAIL WHERE USERID = 'SA001'), MENU_ID, NULL, CURRENT_TIMESTAMP
         FROM SYSTEM_MENU;
@@ -316,9 +323,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 5. BASE PROCEDURES (authentication / registration / password / menus)
--- ===========================================================================
+
+
+
 
 CREATE OR REPLACE PROCEDURE SP_AUTHENTICATE_USER (
     p_userid          IN VARCHAR2,
@@ -347,11 +354,11 @@ EXCEPTION
 END;
 /
 
--- Menu resolution rule used by every menu procedure in this script:
---   a user holds a menu if USER_MENU_ASSIGNMENT has a row for it; if the user
---   has NO per-user rows at all, fall back to the ROLE_MENU_PERMISSION grants
---   of the user's role.  This is what makes an individual assign/remove on
---   the "Assign Menu" screen actually change that user's sidebar.
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_USER_MENUS (
     p_user_detail_id IN  NUMBER,
     p_menu_cursor    OUT SYS_REFCURSOR
@@ -455,20 +462,92 @@ CREATE OR REPLACE PROCEDURE SP_SUBMIT_REGISTRATION (
     p_mobile IN VARCHAR2,
     p_email IN VARCHAR2,
     p_nid IN VARCHAR2,
+    p_office_id IN VARCHAR2,
     p_attachment IN VARCHAR2,
     p_success OUT NUMBER,
     p_msg OUT VARCHAR2
 ) AS
+    v_email      VARCHAR2(100);
+    v_mobile     VARCHAR2(20);
+    v_nid        VARCHAR2(30);
+    v_office_id  VARCHAR2(30);
+    v_user_mobile NUMBER;
+    v_user_email  NUMBER;
+    v_reg_mobile  NUMBER;
+    v_reg_email   NUMBER;
 BEGIN
-    INSERT INTO USER_REGISTRATION (FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH)
-    VALUES (p_fullname, p_mobile, p_email, p_nid, p_attachment);
+    v_email     := LOWER(TRIM(p_email));
+    v_mobile    := TRIM(p_mobile);
+    v_nid       := TRIM(p_nid);
+    v_office_id := TRIM(p_office_id);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Mobile number and email address are required.';
+        RETURN;
+    END IF;
+
+    IF v_nid IS NULL
+       OR NOT REGEXP_LIKE(v_nid, '^[0-9]{10}$|^[0-9]{13}$|^[0-9]{17}$') THEN
+        p_success := 0;
+        p_msg     := 'NID number must be exactly 10, 13 or 17 digits.';
+        RETURN;
+    END IF;
+
+    IF v_office_id IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Office ID Number is required.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(CASE WHEN TRIM(MOBILE_NO) = v_mobile THEN 1 END),
+           COUNT(CASE WHEN LOWER(TRIM(EMAIL)) = v_email THEN 1 END)
+      INTO v_user_mobile, v_user_email
+      FROM USERDETAIL;
+
+    IF v_user_mobile > 0 THEN
+        p_success := 0;
+        p_msg     := 'This mobile number is already in use by a registered user.';
+        RETURN;
+    END IF;
+
+    IF v_user_email > 0 THEN
+        p_success := 0;
+        p_msg     := 'This email address is already in use by a registered user.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(CASE WHEN TRIM(MOBILE_NO) = v_mobile THEN 1 END),
+           COUNT(CASE WHEN LOWER(TRIM(EMAIL)) = v_email THEN 1 END)
+      INTO v_reg_mobile, v_reg_email
+      FROM USER_REGISTRATION
+     WHERE STATUS = 'PENDING';
+
+    IF v_reg_mobile > 0 THEN
+        p_success := 0;
+        p_msg     := 'A registration with this mobile number is already awaiting approval. Please contact your manager.';
+        RETURN;
+    END IF;
+
+    IF v_reg_email > 0 THEN
+        p_success := 0;
+        p_msg     := 'A registration with this email address is already awaiting approval. Please contact your manager.';
+        RETURN;
+    END IF;
+
+    INSERT INTO USER_REGISTRATION (FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH)
+    VALUES (p_fullname, v_mobile, v_email, v_nid, v_office_id, p_attachment);
 
     p_success := 1;
     p_msg     := 'Registration submitted successfully. Awaiting approval.';
 EXCEPTION
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'This mobile number or email address is already in use.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
@@ -477,7 +556,7 @@ CREATE OR REPLACE PROCEDURE SP_GET_PENDING_REGISTRATIONS (
 ) AS
 BEGIN
     OPEN p_cursor FOR
-        SELECT REGISTRATION_ID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH
+        SELECT REGISTRATION_ID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH, OFFICE_ID
         FROM USER_REGISTRATION
         WHERE STATUS = 'PENDING'
         ORDER BY REGISTRATION_ID DESC;
@@ -497,10 +576,12 @@ CREATE OR REPLACE PROCEDURE SP_APPROVE_REGISTRATION (
     v_mobile   VARCHAR2(20);
     v_email    VARCHAR2(100);
     v_nid      VARCHAR2(30);
+    v_office_id VARCHAR2(30);
     v_attach   VARCHAR2(255);
     v_user_role_id NUMBER;
     v_manager_role VARCHAR2(50);
     v_new_user_id  NUMBER;
+    v_count    NUMBER;
 BEGIN
     SELECT UPPER(r.ROLE_NAME) INTO v_manager_role
     FROM USERDETAIL u
@@ -515,26 +596,45 @@ BEGIN
 
     SELECT ROLE_ID INTO v_user_role_id FROM SYSTEM_ROLE WHERE UPPER(ROLE_NAME) = 'USER';
 
-    SELECT FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH
-    INTO v_fullname, v_mobile, v_email, v_nid, v_attach
+    SELECT FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH
+    INTO v_fullname, v_mobile, v_email, v_nid, v_office_id, v_attach
     FROM USER_REGISTRATION
     WHERE REGISTRATION_ID = p_reg_id AND STATUS = 'PENDING';
+
+    v_email  := LOWER(TRIM(v_email));
+    v_mobile := TRIM(v_mobile);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'This registration has no email address or mobile number.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(1) INTO v_count
+      FROM USERDETAIL
+     WHERE LOWER(TRIM(EMAIL)) = v_email
+        OR TRIM(MOBILE_NO) = v_mobile;
+    IF v_count > 0 THEN
+        p_success := 0;
+        p_msg     := 'A user with this email address or mobile number already exists. The registration cannot be approved.';
+        RETURN;
+    END IF;
 
     o_userid    := 'JB' || FN_GET_NEXT_ID('BANK_USER_SEQ');
     o_user_email := v_email;
 
     INSERT INTO USERDETAIL (
-        USERID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH,
+        USERID, FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH,
         USERPASSWORD, ROLE_ID, IS_FIRST_LOGIN, USERSTATUS, FAILED_ATTEMPTS,
         APPROVED_BY_USER_ID, APPROVED_AT
     ) VALUES (
-        o_userid, v_fullname, v_mobile, v_email, v_nid, v_attach,
+        o_userid, v_fullname, v_mobile, v_email, v_nid, v_office_id, v_attach,
         p_temp_password, v_user_role_id, 1, 'Enabled', 0,
         p_manager_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
-    -- Default menu grants: a newly approved user starts with ONLY
-    -- Dashboard + Change Password. More menus are added via Assign Menu.
+
+
     FOR mc IN (
         SELECT MENU_ID FROM SYSTEM_MENU
         WHERE URL_NAME IN ('dashboard', 'change_password')
@@ -554,7 +654,11 @@ EXCEPTION
         p_msg     := 'Registration record or role definition missing.';
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'A user with this email address or mobile number already exists.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
@@ -676,9 +780,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 6. PROFILE / MANAGER / DASHBOARD PROCEDURES
--- ===========================================================================
+
+
+
 
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     p_superadmin_user_id IN  NUMBER,
@@ -695,6 +799,9 @@ CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     v_role_id           NUMBER;
     v_superadmin_role   VARCHAR2(50);
     v_new_user_id       NUMBER;
+    v_email             VARCHAR2(100);
+    v_mobile            VARCHAR2(20);
+    v_count             NUMBER;
 BEGIN
     SELECT UPPER(r.ROLE_NAME) INTO v_superadmin_role
       FROM USERDETAIL u
@@ -704,6 +811,25 @@ BEGIN
     IF v_superadmin_role != 'SUPERADMIN' THEN
         p_success := 0;
         p_msg     := 'Access Denied: Only Superadmin can create Manager accounts.';
+        RETURN;
+    END IF;
+
+    v_email  := LOWER(TRIM(p_email));
+    v_mobile := TRIM(p_mobile);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Mobile number and email address are required.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(1) INTO v_count
+      FROM USERDETAIL
+     WHERE LOWER(TRIM(EMAIL)) = v_email
+        OR TRIM(MOBILE_NO) = v_mobile;
+    IF v_count > 0 THEN
+        p_success := 0;
+        p_msg     := 'A user with this email address or mobile number already exists.';
         RETURN;
     END IF;
 
@@ -717,7 +843,7 @@ BEGIN
         USERID, FULLNAME, MOBILE_NO, EMAIL, NID, IMAGE_PATH, USERPASSWORD,
         ROLE_ID, IS_FIRST_LOGIN, USERSTATUS, APPROVED_BY_USER_ID, APPROVED_AT
     ) VALUES (
-        o_userid, p_fullname, p_mobile, p_email, p_nid, p_image_path, p_temp_password,
+        o_userid, p_fullname, v_mobile, v_email, p_nid, p_image_path, p_temp_password,
         v_role_id, 1, 'Enabled', p_superadmin_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
@@ -745,13 +871,17 @@ EXCEPTION
         p_msg     := 'Superadmin or Manager role definition missing.';
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'A user with this email address or mobile number already exists.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
--- ---------------------------------------------------------------------------
--- AUTO-DISABLE AFTER 3 FAILED LOGIN ATTEMPTS (every role) + RE-ENABLE
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_REGISTER_FAILED_LOGIN (
     p_user_detail_id IN  NUMBER,
     p_max_attempts   IN  NUMBER,
@@ -811,12 +941,12 @@ EXCEPTION
 END;
 /
 
--- Policy: Superadmin may enable ANY account.  A Manager may only enable an
--- account whose role is exactly 'User' - never a Manager or a Superadmin.
--- ---------------------------------------------------------------------------
---  Enforce the enable/disable policy in the database itself, so no caller
---  (web view, background job or ad-hoc SQL session) can bypass it.
--- ---------------------------------------------------------------------------
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SET_USER_STATUS (
     p_actor_user_detail_id  IN NUMBER,
     p_target_user_detail_id IN NUMBER,
@@ -895,6 +1025,7 @@ EXCEPTION
         p_success := 0;
         p_msg     := SQLERRM;
 END;
+/
 
 CREATE OR REPLACE PROCEDURE SP_ENABLE_USER (
     p_actor_user_detail_id  IN NUMBER,
@@ -977,9 +1108,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 7. TICKET PROCEDURES
--- ===========================================================================
+
+
+
 
 CREATE OR REPLACE PROCEDURE SP_RAISE_TICKET (
     p_raised_by_user_detail_id IN NUMBER,
@@ -1096,9 +1227,9 @@ BEGIN
 END;
 /
 
--- NOTE: single-cursor + EXECUTE IMMEDIATE is required. python-oracledb (thin)
--- hangs on MULTIPLE OUT SYS_REFCURSOR vars, and on a NUMBER as the first bind
--- of a ref-cursor call. The Django app passes TICKET_ID as a string.
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_TICKET_BY_ID (
     p_ticket_id     IN NUMBER,
     o_ticket_cursor OUT SYS_REFCURSOR
@@ -1146,7 +1277,7 @@ CREATE OR REPLACE PROCEDURE SP_RESPOND_TICKET (
 BEGIN
     o_success := 0;
 
-    -- Bank Support gate
+
     SELECT UPPER(NVL(r.ROLE_NAME, ''))
       INTO v_responder_role
       FROM USERDETAIL u
@@ -1219,9 +1350,14 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 8. USER UNLOCK SEARCH PROCEDURES
--- ===========================================================================
+
+
+
+
+
+
+
+
 
 CREATE OR REPLACE PROCEDURE SP_GET_USER_BY_MOBILE (
     p_mobile   IN VARCHAR2,
@@ -1229,12 +1365,14 @@ CREATE OR REPLACE PROCEDURE SP_GET_USER_BY_MOBILE (
 ) AS
 BEGIN
     OPEN o_cursor FOR
-        SELECT u.USERID,
+        SELECT u.USERDETAILID,
+               u.USERID,
                u.FULLNAME,
                u.MOBILE_NO,
                u.EMAIL,
                u.USERSTATUS,
                u.FAILED_ATTEMPTS,
+               u.ROLE_ID,
                NVL(r.ROLE_NAME, 'No Role')
           FROM USERDETAIL u
           LEFT JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
@@ -1306,9 +1444,9 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 9. MENU-BASED ACCESS PROCEDURES
--- ===========================================================================
+
+
+
 
 CREATE OR REPLACE PROCEDURE SP_GET_ASSIGNABLE_MENUS (
     p_actor_user_id IN NUMBER,
@@ -1424,12 +1562,12 @@ EXCEPTION
 END;
 /
 
--- Policy:
---   * only a Superadmin or a Manager may call it;
---   * a Manager may only target an account whose role is exactly 'User'
---     (Manager, Bank Support and Superadmin accounts are Superadmin-only);
---   * nobody may change their own menus;
---   * you may only grant a menu that you hold yourself.
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_actor_user_id  IN NUMBER,
     p_target_userid  IN VARCHAR2,
@@ -1507,8 +1645,8 @@ BEGIN
         RETURN;
     END IF;
 
-    -- First explicit edit for this target: materialise the role grants so the
-    -- single add/remove never silently wipes the user's other menus.
+
+
     SELECT COUNT(1) INTO v_target_per_user
       FROM USER_MENU_ASSIGNMENT
      WHERE USERDETAILID = v_target_id;
@@ -1631,8 +1769,7 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
---  DONE. Verify with:
---  SELECT object_name FROM user_objects WHERE status = 'INVALID';
---  Login to Django with  SA001 / Admin@123  (Superadmin)
--- ===========================================================================
+
+
+
+

@@ -1,0 +1,285 @@
+﻿{% extends "base.html" %}
+
+{% block title %}eJanata User Unlock | JB Call Center{% endblock %}
+{% block page_heading %}eJanata User Unlock{% endblock %}
+{% block page_title %}Unlock eJanata User by Mobile Number{% endblock %}
+{% block page_sub %}Search the 11 digit mobile number, check the status, then press Unlock User on the user found in the eJanata application.{% endblock %}
+
+{% block content %}
+<style>
+  .unlock-search { display: flex; gap: .6rem; align-items: flex-start; flex-wrap: wrap; }
+  .unlock-search .form-group { flex: 1; min-width: 260px; margin-bottom: 0; }
+  .note-box { padding: .85rem .95rem; border-radius: 10px; font-size: .84rem; line-height: 1.5; margin: 0 0 1.1rem; }
+  .note-box.info { background: #e7f3fb; border: 1px solid #bfe0f2; color: #135b84; }
+  .note-box.ok { background: #e7f3e9; border: 1px solid #c3e4cb; color: #14603e; }
+  .note-box.warn { background: #fdf3dc; border: 1px solid #f0dda6; color: #8a5b08; }
+  .note-box.err { background: #fdeeea; border: 1px solid #f5c6bd; color: #a33a2f; }
+  .note-box code { background: rgba(255,255,255,.7); padding: .1rem .35rem; border-radius: 5px; }
+  .note-box:last-child { margin-bottom: 0; }
+
+  /* Details returned by the search API */
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .85rem; }
+  .detail-item { background: #f8fbfd; border: 1px solid var(--line); border-radius: 11px; padding: .7rem .85rem; }
+  .detail-label { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 700; margin-bottom: .2rem; }
+  .detail-value { display: block; font-size: .88rem; font-weight: 600; color: var(--sky-900); word-break: break-word; }
+
+  /* Status of the user being unlocked, in the other application */
+  .status-head { margin: 1.25rem 0 .75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .7rem; }
+  .status-cell { background: #f8fbfd; border: 1px solid var(--line); border-radius: 11px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+
+  /* The one status the screen acts on, shown as a pill rather than as a
+     disabled button, so it cannot be mistaken for something to press. */
+  .status-current { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  .status-pill { display: inline-flex; align-items: center; padding: .42rem .85rem; border-radius: 9px; font-size: .8rem; font-weight: 700; color: #fff; }
+  .status-pill.pill-good { background: linear-gradient(135deg, #22a06b, #178a5f); }
+  .status-pill.pill-danger { background: linear-gradient(135deg, #ef6a60, #d6473e); }
+
+  /* Unlock bar that sits under the details */
+  .unlock-foot { border-top: 1px solid var(--line); background: #fbfdfe; padding: 1rem 1.25rem; }
+  .unlock-foot form { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+  .unlock-foot .unlock-hint { font-size: .78rem; color: var(--muted); }
+  .unlock-foot .action-note { margin: 0; }
+
+  /* Mobile number validation */
+  .form-control.error { border-color: var(--danger); background: #fff; box-shadow: 0 0 0 4px rgba(214,71,62,.12); }
+  .mobile-error { display: none; font-size: .76rem; color: var(--danger); margin-top: .35rem; }
+  .mobile-error.show { display: block; }
+
+  /* Whole-page loader: covers the sidebar too and blocks every click. */
+  body.page-busy { pointer-events: none; user-select: none; }
+  .page-loader { position: fixed; inset: 0; z-index: 200; display: none; align-items: center; justify-content: center; background: rgba(242,247,251,.85); }
+  .page-loader.show { display: flex; }
+  .loader-box { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 1.4rem 1.8rem; display: flex; flex-direction: column; align-items: center; gap: .85rem; box-shadow: var(--shadow); }
+  .loader-box .spinner { width: 34px; height: 34px; border: 3px solid #dbeafe; border-top-color: var(--sky-500); border-radius: 50%; animation: spin .7s linear infinite; }
+  .loader-text { font-size: .85rem; font-weight: 600; color: var(--ink); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+{% if errormsg %}
+<div class="note-box err">{{ errormsg }}</div>
+{% endif %}
+
+{% if unlocked %}
+<div class="note-box ok">
+  {{ unlocked.msg }}
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Find User by Mobile Number</div>
+      <div class="panel-sub">Enter the 11 digit mobile number exactly as it is registered (e.g. 01712345678)</div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <form method="post" action="{% url 'ejanata_user_unlock' %}" class="unlock-search" id="unlockSearchForm" autocomplete="off">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="unlock_mobile">Mobile Number</label>
+        <input type="text" class="form-control" id="unlock_mobile" name="mobileno"
+               value="{{ mobileno|default:'' }}"
+               placeholder="e.g. 01712345678" inputmode="numeric" spellcheck="false"
+               maxlength="11" pattern="01[3-9][0-9]{8}" title="11 digits, starting with 01 (e.g. 01712345678)"
+               required autofocus>
+        <div class="mobile-error" id="unlock_mobile_err">Mobile number must be exactly 11 digits and start with 01 (e.g. 01712345678).</div>
+      </div>
+      <div style="min-width:210px;">
+        <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.4rem; visibility:hidden;">&nbsp;</label>
+        <button type="submit" class="btn btn-primary" name="btnfetchuser" value="1" style="width:100%;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Search
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if searched or ejanatauser or ejanataerr %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">User Information</div>
+      <div class="panel-sub">
+        {% if ejanatauser %}
+          Customer found in the eJanata application for {{ mobileno }}. Check the status below,
+          then press Unlock User to release the account in that application.
+        {% elif ejanataerr %}
+          The eJanata application could not be reached for {{ mobileno }}.
+        {% else %}
+          No user found with mobile number {{ mobileno }}.
+        {% endif %}
+      </div>
+    </div>
+    {% if ejanatauser %}<span class="badge badge-info">eJanata user</span>{% endif %}
+    {% if unlock_allowed %}<span class="badge badge-good">Unlock available</span>{% endif %}
+  </div>
+
+  <div class="panel-body">
+    {% if ejanataerr %}
+    <div class="note-box warn">{{ ejanataerr }}</div>
+    {% endif %}
+
+    {% if ejanatauser %}
+    <div class="detail-grid">
+      <div class="detail-item">
+        <span class="detail-label">Name</span>
+        <span class="detail-value">{{ ejanatauser.Name|default:'-' }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Mobile</span>
+        <span class="detail-value num">{{ ejanatauser.Mobileno|default:mobileno }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Date of Birth</span>
+        <span class="detail-value num">{{ ejanatauser.Dob|default:'-' }}</span>
+      </div>
+    </div>
+
+    <div class="status-head">
+      <div>
+        <div class="panel-title" style="font-size:.95rem;">User Status</div>
+        <div class="panel-sub">Current status of this user in the eJanata application &mdash; the status the Unlock User button acts on.</div>
+      </div>
+    </div>
+    <div class="status-grid">
+      <div class="status-cell">
+        <span class="detail-label">Status</span>
+        <span class="status-pill {% if statusview.tone == 'good' %}pill-good{% else %}pill-danger{% endif %}">{{ statusview.label }}</span>
+      </div>
+    </div>
+    {% else %}
+    <div class="note-box warn">
+      No user found with mobile number <strong>{{ mobileno }}</strong> in the eJanata application.
+    </div>
+    {% endif %}
+  </div>
+
+  {% if ejanatauser %}
+  <div class="unlock-foot">
+    {% if unlock_allowed %}
+    <form method="post" action="{% url 'ejanata_user_unlock' %}" class="unlock-form">
+      {% csrf_token %}
+      <input type="hidden" name="mobileno" value="{{ mobileno }}">
+      <input type="hidden" name="appuserinfoid" value="{{ appuserinfoid }}">
+      <button type="submit" class="btn btn-primary" name="btnunlockuser" value="1"
+              data-user="{{ ejanatauser.Name|default:mobileno }}"
+              data-mobile="{{ ejanatauser.Mobileno|default:mobileno }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>
+        Unlock User
+      </button>
+      <span class="unlock-hint">
+        Releases <strong>{{ ejanatauser.Name|default:mobileno }}</strong>
+        ({{ ejanatauser.Mobileno|default:mobileno }}) in the eJanata application.
+      </span>
+    </form>
+    {% else %}
+    <div class="note-box warn action-note">{{ action_message }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="page-loader" id="pageLoader" role="status" aria-live="polite">
+  <div class="loader-box">
+    <div class="spinner"></div>
+    <div class="loader-text" id="pageLoaderText">Please wait&hellip;</div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var MOBILE_RE = /^01[3-9]\d{8}$/;
+    var mobileIn = document.getElementById('unlock_mobile');
+    var errEl = document.getElementById('unlock_mobile_err');
+    var searchForm = document.getElementById('unlockSearchForm');
+    var overlay = document.getElementById('pageLoader');
+    var loaderText = document.getElementById('pageLoaderText');
+    var unlockForms = document.querySelectorAll('form.unlock-form');
+    var busy = false;
+
+    function showError(message) {
+      errEl.textContent = message;
+      errEl.classList.add('show');
+      mobileIn.classList.add('error');
+    }
+
+    function clearError() {
+      errEl.classList.remove('show');
+      mobileIn.classList.remove('error');
+    }
+
+    /* Lock the whole page and raise the loader until the API answers. */
+    function lock(text) {
+      busy = true;
+      loaderText.textContent = text;
+      overlay.classList.add('show');
+      document.body.classList.add('page-busy');
+    }
+
+    function unlock() {
+      busy = false;
+      overlay.classList.remove('show');
+      document.body.classList.remove('page-busy');
+    }
+
+    function mobileIsValid() {
+      var value = mobileIn.value.trim();
+      if (!value) {
+        showError('Please enter the mobile number of the account to unlock.');
+        return false;
+      }
+      if (!/^\d{11}$/.test(value) || !MOBILE_RE.test(value)) {
+        showError('Mobile number must be exactly 11 digits and start with 01 (e.g. 01712345678).');
+        return false;
+      }
+      clearError();
+      return true;
+    }
+
+    mobileIn.addEventListener('input', function () {
+      mobileIn.value = mobileIn.value.replace(/[^0-9]/g, '').slice(0, 11);
+      clearError();
+    });
+
+    /* Search: the API looks the app user up, the loader covers the wait. */
+    searchForm.addEventListener('submit', function (event) {
+      if (!mobileIsValid()) {
+        event.preventDefault();
+        mobileIn.focus();
+        return;
+      }
+      if (busy) { event.preventDefault(); return; }
+      lock('Searching for the user\u2026');
+    });
+
+    /* Unlock: the button under the details. It lifts a lock in the OTHER
+       application, so it is confirmed by name and mobile number first. The App
+       User ID the endpoint is called with travels hidden with this form. */
+    Array.prototype.forEach.call(unlockForms, function (form) {
+      form.addEventListener('submit', function (event) {
+        if (busy) { event.preventDefault(); return; }
+
+        var button = form.querySelector('button[name="btnunlockuser"]');
+        var user = (button && button.getAttribute('data-user')) || 'this user';
+        var mobile = (button && button.getAttribute('data-mobile')) || '';
+        var confirmed = window.confirm(
+          'Unlock ' + user + (mobile ? ' (' + mobile + ')' : '') +
+          '?\n\nThe account will be released in the eJanata application and the user will be able to log in again.');
+        if (!confirmed) {
+          event.preventDefault();
+          return;
+        }
+        lock('Unlocking ' + user + '\u2026');
+      });
+    });
+
+    /* Back/forward cache restore after a failed post. */
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted || busy) { unlock(); }
+    });
+  })();
+</script>
+{% endblock %}

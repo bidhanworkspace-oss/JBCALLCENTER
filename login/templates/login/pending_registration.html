@@ -23,6 +23,7 @@
             <th>Mobile</th>
             <th>Email</th>
             <th>NID</th>
+            <th>Office ID</th>
             <th>Attachment</th>
             <th>Action</th>
           </tr>
@@ -35,6 +36,7 @@
             <td class="num">{{ reg.mobile }}</td>
             <td>{{ reg.email }}</td>
             <td class="num muted">{{ reg.nid }}</td>
+            <td class="num muted">{{ reg.office_id|default:'-' }}</td>
             <td>
               {% if reg.attachment_path %}
                 <a class="btn btn-ghost btn-sm" href="{{ reg.attachment_path }}" target="_blank">
@@ -53,7 +55,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="empty">No pending registrations found.</td></tr>
+          <tr><td colspan="8" class="empty">No pending registrations found.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -43,8 +43,13 @@
         </div>
         <div class="form-group" id="cm_fg_nid">
           <label for="cm_nid">NID Number</label>
-          <input class="form-control" type="text" id="cm_nid" name="nid" placeholder="10 or 17 digit NID" required>
-          <div class="cm-error" id="cm_nid_err">Enter a valid NID number (10 or 17 digits).</div>
+          <input class="form-control" type="text" id="cm_nid" name="nid" placeholder="10, 13 or 17 digit NID" required>
+          <div class="cm-error" id="cm_nid_err">Enter a valid NID number (10, 13 or 17 digits).</div>
+        </div>
+        <div class="form-group" id="cm_fg_office">
+          <label for="cm_officeid">Office ID</label>
+          <input class="form-control" type="text" id="cm_officeid" name="officeid" placeholder="e.g. DOA-1234" autocomplete="off" required>
+          <div class="cm-error" id="cm_office_err">Office ID must be 1 to 30 characters using only letters, numbers, spaces, '-', '_' or '/'.</div>
         </div>
         <div class="form-group">
           <label for="cm_photo">Photo (JPG / PNG only, max 5 MB)</label>
@@ -84,6 +89,7 @@
     var mobileInput = document.getElementById('cm_mobile');
     var emailInput = document.getElementById('cm_email');
     var nidInput = document.getElementById('cm_nid');
+    var officeInput = document.getElementById('cm_officeid');
 
     function el(id) { return document.getElementById(id); }
 
@@ -116,8 +122,14 @@
     }
 
     function validateNid() {
-      var ok = /^\d{10}$/.test(nidInput.value.trim()) || /^\d{17}$/.test(nidInput.value.trim());
+      var ok = /^\d{10}$/.test(nidInput.value.trim()) || /^\d{13}$/.test(nidInput.value.trim()) || /^\d{17}$/.test(nidInput.value.trim());
       setField('cm_fg_nid', nidInput, !ok);
+      return ok;
+    }
+
+    function validateOfficeId() {
+      var ok = /^[A-Za-z0-9][A-Za-z0-9 \-_\/]{0,29}$/.test(officeInput.value.trim());
+      setField('cm_fg_office', officeInput, !ok);
       return ok;
     }
 
@@ -155,17 +167,18 @@
       }
     });
 
-    [nameInput, mobileInput, emailInput, nidInput].forEach(function (i) {
+    [nameInput, mobileInput, emailInput, nidInput, officeInput].forEach(function (i) {
       i.addEventListener('input', function () {
         if (i === nameInput) validateName();
         else if (i === mobileInput) validateMobile();
         else if (i === emailInput) validateEmail();
-        else validateNid();
+        else if (i === nidInput) validateNid();
+        else validateOfficeId();
       });
     });
 
     form.addEventListener('submit', function (e) {
-      var ok = validateName() && validateMobile() && validateEmail() && validateNid() && validatePhoto();
+      var ok = validateName() && validateMobile() && validateEmail() && validateNid() && validateOfficeId() && validatePhoto();
       if (!ok) {
         e.preventDefault();
         return;

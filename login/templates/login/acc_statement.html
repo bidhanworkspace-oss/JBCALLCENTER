@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}Account Statement | JB Call Center{% endblock %}
+{% block page_heading %}Acc Statement{% endblock %}
+{% block page_title %}Account Statement by Account Number{% endblock %}
+{% block page_sub %}Enter the account number, then press Search to list its transactions.{% endblock %}
+
+{% block content %}
+<style>
+  .acc-search { display: flex; gap: .6rem; align-items: flex-start; flex-wrap: wrap; }
+  .acc-search .form-group { flex: 1; min-width: 260px; margin-bottom: 0; }
+  .note-box { padding: .85rem .95rem; border-radius: 10px; font-size: .84rem; line-height: 1.5; margin: 0 0 1.1rem; }
+  .note-box.info { background: #e7f3fb; border: 1px solid #bfe0f2; color: #135b84; }
+  .note-box.ok { background: #e7f3e9; border: 1px solid #c3e4cb; color: #14603e; }
+  .note-box.warn { background: #fdf3dc; border: 1px solid #f0dda6; color: #8a5b08; }
+  .note-box.err { background: #fdeeea; border: 1px solid #f5c6bd; color: #a33a2f; }
+  .note-box:last-child { margin-bottom: 0; }
+
+  /* Debit / Credit: the Type column is a button, red for money out and green
+     for money in. is_debit / is_credit are decided in the view. */
+  .txn-type {
+    display: inline-flex; align-items: center; gap: .3rem;
+    min-width: 84px; justify-content: center;
+    padding: .3rem .7rem; border-radius: 999px;
+    font-size: .74rem; font-weight: 700; text-transform: capitalize;
+    border: 1px solid transparent; cursor: default;
+  }
+  .txn-type.debit { background: #fdeeea; border-color: #f5c6bd; color: #a33a2f; }
+  .txn-type.credit { background: #e7f3e9; border-color: #c3e4cb; color: #14603e; }
+  .txn-type.unknown { background: #eef2f5; border-color: var(--line); color: #5a6b7a; }
+  .txn-type .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+
+  /* Summary line under the table */
+  .stmt-summary { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  .stmt-chip {
+    display: inline-flex; align-items: baseline; gap: .4rem;
+    padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--line);
+    background: #f8fbfd; font-size: .78rem; color: var(--muted); font-weight: 600;
+  }
+  .stmt-chip .val { font-size: .92rem; font-weight: 800; color: var(--sky-900); font-variant-numeric: tabular-nums; }
+  .stmt-chip.debit .val { color: #a33a2f; }
+  .stmt-chip.credit .val { color: #14603e; }
+
+  /* Sample-data banner: the rows are placeholders until the live endpoint is
+     wired in, and must never be readable as real transactions. */
+  .sample-banner {
+    display: flex; align-items: flex-start; gap: .7rem;
+    padding: .85rem 1rem; border-radius: 12px; margin: 0 0 1rem;
+    background: #fdf3dc; border: 1px solid #f0dda6; color: #8a5b08;
+    font-size: .84rem; line-height: 1.5;
+  }
+  .sample-banner svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+  .sample-banner strong { display: block; }
+
+  .form-control.error { border-color: var(--danger); background: #fff; box-shadow: 0 0 0 4px rgba(214,71,62,.12); }
+  .acc-error { display: none; font-size: .76rem; color: var(--danger); margin-top: .35rem; }
+  .acc-error.show { display: block; }
+
+  /* Whole-page loader: covers the sidebar too and blocks every click. */
+  body.page-busy { pointer-events: none; user-select: none; }
+  .page-loader { position: fixed; inset: 0; z-index: 200; display: none; align-items: center; justify-content: center; background: rgba(242,247,251,.85); }
+  .page-loader.show { display: flex; }
+  .loader-box {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 1.4rem 1.8rem; display: flex; flex-direction: column; align-items: center; gap: .85rem;
+    box-shadow: var(--shadow);
+  }
+  .loader-box .spinner {
+    width: 34px; height: 34px; border: 3px solid #dbeafe;
+    border-top-color: var(--sky-500); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  .loader-text { font-size: .85rem; font-weight: 600; color: var(--ink); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+{% if errormsg %}
+<div class="note-box err">{{ errormsg }}</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Find Account Statement</div>
+      <div class="panel-sub">Enter the account number exactly as it is registered (e.g. 100123456789)</div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <form method="post" action="{% url 'acc_statement' %}" class="acc-search" id="accSearchForm" autocomplete="off">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="acc_no">Account Number</label>
+        <input type="text" class="form-control" id="acc_no" name="accno"
+               value="{{ accno|default:'' }}"
+               placeholder="e.g. 100123456789" inputmode="numeric" spellcheck="false"
+               maxlength="25" pattern="[A-Za-z0-9]{4,25}"
+               title="4 to 25 letters or digits, no spaces"
+               required autofocus>
+        <div class="acc-error" id="acc_no_err">Account number must be 4 to 25 letters or digits, with no spaces (e.g. 100123456789).</div>
+      </div>
+      <div style="min-width:210px;">
+        <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.4rem; visibility:hidden;">&nbsp;</label>
+        <button type="submit" class="btn btn-primary" name="btnsearchstatement" value="1" style="width:100%;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Search
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if searched %}
+{% if is_sample %}
+<div class="sample-banner">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+  <span>
+    <strong>Sample data &mdash; not real transactions.</strong>
+    The account statement endpoint is not configured on this server yet, so the
+    rows below are placeholders used to build the table. Configure
+    <code>EJANATA_ACC_STATEMENT_ENDPOINT</code> in <code>config/settings.py</code>
+    and they are replaced by the live statement.
+  </span>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Account Statement</div>
+      <div class="panel-sub">
+        {% if rows %}
+          {{ rows|length }} transaction{{ rows|length|pluralize }} for account {{ accno }}.
+        {% else %}
+          No transactions returned for account {{ accno }}.
+        {% endif %}
+      </div>
+    </div>
+    {% if accno %}<span class="badge badge-info">{{ accno }}</span>{% endif %}
+  </div>
+
+  <div class="panel-body flush">
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:22%;">Txn Date</th>
+            <th style="width:20%;">Amount</th>
+            <th style="width:16%;">Type</th>
+            <th style="width:42%;">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="num">{{ row.txndate }}</td>
+            <td class="num strong">{{ row.amount }}</td>
+            <td>
+              <span class="txn-type {% if row.is_debit %}debit{% elif row.is_credit %}credit{% else %}unknown{% endif %}">
+                <span class="dot"></span>{{ row.type }}
+              </span>
+            </td>
+            <td>{{ row.description }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="4">
+              <div class="empty">
+                {% if is_sample %}
+                  Sample data is only shown when the endpoint is configured, so no rows came back.
+                {% else %}
+                  No transactions were returned for this account.
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if rows %}
+    <div style="padding: 0 1.25rem 1.25rem;">
+      <div class="stmt-summary">
+        <span class="stmt-chip debit">
+          Debit total <span class="val">{{ totals.debit|floatformat:2 }}</span>
+        </span>
+        <span class="stmt-chip credit">
+          Credit total <span class="val">{{ totals.credit|floatformat:2 }}</span>
+        </span>
+        <span class="stmt-chip">
+          Transactions <span class="val">{{ rows|length }}</span>
+        </span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-loader" id="pageLoader" role="status" aria-live="polite">
+  <div class="loader-box">
+    <div class="spinner"></div>
+    <div class="loader-text" id="pageLoaderText">Please wait&hellip;</div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var ACC_RE = /^[A-Za-z0-9]{4,25}$/;
+    var accIn = document.getElementById('acc_no');
+    var errEl = document.getElementById('acc_no_err');
+    var searchForm = document.getElementById('accSearchForm');
+    var overlay = document.getElementById('pageLoader');
+    var loaderText = document.getElementById('pageLoaderText');
+    var busy = false;
+
+    function showError(message) {
+      errEl.textContent = message;
+      errEl.classList.add('show');
+      accIn.classList.add('error');
+    }
+
+    function clearError() {
+      errEl.classList.remove('show');
+      accIn.classList.remove('error');
+    }
+
+    /* Lock the whole page and raise the loader until the API answers. */
+    function lock(text) {
+      busy = true;
+      loaderText.textContent = text;
+      overlay.classList.add('show');
+      document.body.classList.add('page-busy');
+    }
+
+    function unlock() {
+      busy = false;
+      overlay.classList.remove('show');
+      document.body.classList.remove('page-busy');
+    }
+
+    function accountIsValid() {
+      var value = accIn.value.trim();
+      if (!value) {
+        showError('Please enter the account number to search.');
+        return false;
+      }
+      if (!ACC_RE.test(value)) {
+        showError('Account number must be 4 to 25 letters or digits, with no spaces (e.g. 100123456789).');
+        return false;
+      }
+      clearError();
+      return true;
+    }
+
+    accIn.addEventListener('input', function () {
+      accIn.value = accIn.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 25);
+      clearError();
+    });
+
+    /* Search: the API returns the whole statement, the loader covers the wait. */
+    searchForm.addEventListener('submit', function (event) {
+      if (!accountIsValid()) {
+        event.preventDefault();
+        accIn.focus();
+        return;
+      }
+      if (busy) { event.preventDefault(); return; }
+      lock('Loading the statement\u2026');
+    });
+
+    /* Back/forward cache restore after a failed post. */
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted || busy) { unlock(); }
+    });
+  })();
+</script>
+{% endblock %}

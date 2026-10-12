@@ -1,52 +1,7 @@
--- ===========================================================================
---  JB CALL CENTER - FIX: ASSIGN MENU, USER UNLOCK, DISABLE/ENABLE, LOGIN LOCKOUT
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---  Idempotent - safe to re-run.
---
---  WHAT WAS BROKEN (and what this script repairs)
---  ----------------------------------------------------------------------
---  1. ASSIGN MENU HAD NO EFFECT
---     The deployed SP_GET_USER_MENUS / SP_CHECK_USER_MENU_ACCESS /
---     SP_GET_ASSIGNABLE_MENUS read ROLE_MENU_PERMISSION ONLY. The "Assign
---     Menu" screen writes USER_MENU_ASSIGNMENT, which nothing ever read, so a
---     removed menu kept showing and a newly assigned menu never appeared.
---     -> all three are recreated to resolve "per-user rows first, role grants
---        only as a fallback when the user has no per-user rows at all".
---
---  2. USER UNLOCK / DISABLE-ENABLE ALWAYS SAID "ACCESS DENIED"
---     SYSTEM_MENU had no row with URL_NAME = 'disable_enable', so
---     SP_CHECK_USER_MENU_ACCESS always returned 0 for every user.
---     -> the menu row is inserted and granted to Superadmin + Manager.
---
---  3. THREE WRONG PASSWORDS NEVER LOCKED THE ACCOUNT
---     SP_REGISTER_FAILED_LOGIN / SP_RESET_FAILED_LOGIN / SP_ENABLE_USER were
---     never created in the database, and the matching Python methods in
---     login/api.py were empty stubs.
---     -> the three procedures are created here.
---
---  4. DISABLED USERS COULD STILL BE WORKED ON AS "ENABLED"
---     -> SP_SET_USER_STATUS centralises enable/disable with the role policy:
---          Superadmin -> any account (manager or user)
---          Manager    -> regular User accounts only
---          nobody     -> their own account
---
---  VERIFY AFTERWARDS
---    SELECT object_name, status FROM user_objects
---     WHERE object_name IN ('SP_REGISTER_FAILED_LOGIN','SP_RESET_FAILED_LOGIN',
---                           'SP_ENABLE_USER','SP_SET_USER_STATUS');
---    -- expect 4 rows, all VALID
--- ===========================================================================
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ===========================================================================
--- 1. MENU ROWS
---    'user_unlock'    -> mobile-number unlock screen (open to every role that
---                        holds the menu grant)
---    'disable_enable' -> enable/disable screen (Superadmin any, Manager users)
--- ===========================================================================
 DECLARE
     v_id NUMBER;
 BEGIN
@@ -67,9 +22,6 @@ BEGIN
 END;
 /
 
--- Grant both screens to the Superadmin and Manager roles, and copy them into
--- the per-user rows of every existing Superadmin / Manager so they see the new
--- menu immediately (regular users only get it through the Assign Menu screen).
 DECLARE
     v_menu_id NUMBER;
 BEGIN
@@ -98,9 +50,6 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 2. MENU RESOLUTION - per-user rows first, role grants as fallback
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_GET_USER_MENUS (
     p_user_detail_id IN  NUMBER,
     p_menu_cursor    OUT SYS_REFCURSOR
@@ -133,7 +82,7 @@ CREATE OR REPLACE PROCEDURE SP_CHECK_USER_MENU_ACCESS (
 ) AS
     v_count NUMBER := 0;
 BEGIN
-    -- Case / whitespace tolerant on both the menu URL and the stored grants.
+
     SELECT COUNT(1) INTO v_count
       FROM SYSTEM_MENU m
      WHERE UPPER(TRIM(m.URL_NAME)) = UPPER(TRIM(p_url_name))
@@ -186,9 +135,6 @@ BEGIN
 END;
 /
 
--- "You may only grant menus that are assigned to you" must use the same
--- resolution rule, otherwise the Assign Menu screen refuses a grant that the
--- sidebar is showing.
 CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_actor_user_id  IN NUMBER,
     p_target_userid  IN VARCHAR2,
@@ -306,9 +252,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 3. LOGIN LOCKOUT - 3 wrong passwords disables the account (every role)
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_REGISTER_FAILED_LOGIN (
     p_user_detail_id  IN  NUMBER,
     p_max_attempts    IN  NUMBER,
@@ -371,11 +314,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 4. ENABLE / DISABLE
---    Policy: Superadmin -> any account. Manager -> regular User accounts only.
---    Nobody may change their own status. Enabling always clears the counter.
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_SET_USER_STATUS (
     p_actor_user_detail_id  IN NUMBER,
     p_target_user_detail_id IN NUMBER,
@@ -456,7 +394,6 @@ EXCEPTION
 END;
 /
 
--- Re-enable only (convenience wrapper used by the API layer).
 CREATE OR REPLACE PROCEDURE SP_ENABLE_USER (
     p_actor_user_detail_id  IN NUMBER,
     p_target_user_detail_id IN NUMBER,
@@ -471,12 +408,6 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 5. UNLOCK BY MOBILE NUMBER
---    The Unlock screen takes ONLY a mobile number and calls this with it.
---    Enables the account, clears the lock counter and installs a temporary
---    password (o_userid / o_email come back so the caller can mail it).
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_UNLOCK_USER_BY_MOBILE (
     p_mobile               IN  VARCHAR2,
     p_temp_hashed_password IN  VARCHAR2,
@@ -540,17 +471,6 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 6. DEFAULT MENUS FOR A NEWLY CREATED MANAGER
---    SP_CREATE_MANAGER_BY_SUPERADMIN hard-coded the Manager menu list and did
---    not know about the new 'disable_enable' menu, so a Manager created after
---    this fix would have had no Disable/Enable screen at all.  It is recreated
---    here with 'disable_enable' added.  'user_unlock' is deliberately KEPT:
---    Unlock stays available to every role that holds the menu grant.
---    ('SP_APPROVE_REGISTRATION' is NOT changed: a freshly approved self-
---     registered user only ever gets dashboard + change_password, and the
---     Superadmin can grant anything else per user from Assign Menu.)
--- ===========================================================================
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     p_superadmin_user_id IN  NUMBER,
     p_fullname            IN  VARCHAR2,
@@ -622,6 +542,3 @@ END;
 
 COMMIT;
 
--- ===========================================================================
---  DONE
--- ===========================================================================

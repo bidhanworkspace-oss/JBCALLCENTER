@@ -1,34 +1,34 @@
--- ===========================================================================
---  *** SUPERSEDED - DO NOT USE ***
---  This legacy patch has been folded into:
---    - JB_CALLCENTER_SETUP.sql      (brand-new install, no triggers/sequences)
---    - JB_CALLCENTER_MIGRATION_NO_TRIGGER_SEQUENCE.sql  (upgrade of existing DB)
---  Use one of those two files instead of this one.
--- ===========================================================================
---  JB CALL CENTER - TICKET SYSTEM + PROFILE/MANAGER FIXES (ORACLE)
--- ---------------------------------------------------------------------------
---  Written against the ACTUAL schema of 172.18.18.166:1521/JBPAY
---    Tables : USERDETAIL, USER_REGISTRATION, SYSTEM_MENU, SYSTEM_ROLE,
---             ROLE_MENU_PERMISSION, USER_ACTION_AUDIT_LOG
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---
---  What this script does
---    A. Adds IMAGE_PATH to USERDETAIL (manager / user photos).
---    B. Replaces SP_CREATE_MANAGER_BY_SUPERADMIN so it stores the photo.
---    C. Creates profile + dashboard SPs (SP_GET_USER_DETAILS,
---       SP_GET_ACTIVE_USERS, SP_GET_LOCKED_USERS).
---    D. Creates the ticket tables + sequences + triggers.
---    E. Creates the ticket SPs (raise / list / detail / respond).
---    F. Registers the Tickets menu items and grants them to the roles.
---
---  DESIGN RULE: Django views contain NO SQL. Everything goes through the
---  SP_* procedures below.
--- ===========================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /
 
--- ===========================================================================
---  SECTION A. USER PHOTO COLUMN
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -41,12 +41,12 @@ BEGIN
 END;
 /
 
--- ===========================================================================
---  SECTION B. CREATE MANAGER PROCEDURE (NOW WITH PHOTO)
---  Django passes: (p_superadmin_user_id, p_fullname, p_mobile, p_email,
---                  p_nid, p_image_path, p_temp_password,
---                  o_bank_id, o_success, o_msg)
--- ===========================================================================
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     p_superadmin_user_id IN NUMBER,
     p_fullname IN VARCHAR2,
@@ -62,7 +62,7 @@ CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     v_role_id NUMBER;
     v_superadmin_role VARCHAR2(50);
 BEGIN
-    -- Verify executing user is Superadmin
+
     SELECT UPPER(r.ROLE_NAME) INTO v_superadmin_role
     FROM USERDETAIL u
     JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
@@ -74,7 +74,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Get Manager Role ID
+
     SELECT ROLE_ID INTO v_role_id FROM SYSTEM_ROLE WHERE UPPER(ROLE_NAME) = 'MANAGER';
 
     p_gen_bank_id := 'MGR' || SEQ_BANK_ID.NEXTVAL;
@@ -100,11 +100,11 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
---  SECTION C. PROFILE + DASHBOARD PROCEDURES
--- ===========================================================================
 
--- C1. Profile used by Django right after login (topbar photo).
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_USER_DETAILS (
     p_user_id     IN  NUMBER,
     o_fullname    OUT VARCHAR2,
@@ -135,9 +135,9 @@ EXCEPTION
 END;
 /
 
--- C2. All active (Enabled) users for the manager dashboard.
--- Column order MUST match Django:
--- bank_id, fullname, mobile, email, role_name, image_path, status, created_at
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_ACTIVE_USERS (
     p_out_cursor OUT SYS_REFCURSOR
 ) AS
@@ -159,9 +159,9 @@ BEGIN
 END;
 /
 
--- C3. Locked / Disabled users for the manager dashboard.
--- Column order MUST match Django:
--- bank_id, fullname, email, status, failed_attempts
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_LOCKED_USERS (
     p_out_cursor OUT SYS_REFCURSOR
 ) AS
@@ -178,9 +178,9 @@ BEGIN
 END;
 /
 
--- ===========================================================================
---  SECTION D. TICKET TABLES (with sequences + triggers)
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -266,11 +266,11 @@ BEGIN
 END;
 /
 
--- ===========================================================================
---  SECTION E. TICKET PROCEDURES (NO SQL IN VIEWS - ALL HERE)
--- ===========================================================================
 
--- E1. RAISE A TICKET
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_RAISE_TICKET (
     p_raised_by_user_id  IN NUMBER,
     p_raised_by_bank_id  IN VARCHAR2,
@@ -331,10 +331,10 @@ EXCEPTION
 END;
 /
 
--- E2. TICKET LIST WITH LATEST / HIGH-PRIORITY FILTER
--- Column order MUST match Django:
--- ticket_id, ticket_ref, issue_type, customer_name, mobile_no, account_no,
--- priority, status, raised_by_bank_id, created_at, response_count, open_days
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_TICKETS (
     p_filter     IN VARCHAR2 DEFAULT 'LATEST',
     p_out_cursor OUT SYS_REFCURSOR
@@ -385,11 +385,11 @@ BEGIN
 END;
 /
 
--- E3. TICKET DETAIL (header + response thread)
--- NOTE: kept as two separate single-cursor procedures. python-oracledb (thin)
--- hangs when a callproc returns MULTIPLE OUT SYS_REFCURSOR vars together, and
--- also when the FIRST bind of such a call is a NUMBER. The Django app therefore
--- passes TICKET_ID as a string and calls these one cursor at a time.
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_TICKET_BY_ID (
     p_ticket_id     IN NUMBER,
     o_ticket_cursor OUT SYS_REFCURSOR
@@ -423,7 +423,7 @@ BEGIN
 END;
 /
 
--- E4. RESPOND / SOLVE / DENY A TICKET
+
 CREATE OR REPLACE PROCEDURE SP_RESPOND_TICKET (
     p_ticket_id         IN NUMBER,
     p_responder_user_id IN NUMBER,
@@ -496,17 +496,17 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
---  SECTION F. MENU REGISTRATION
---  Adds the ticket menus and grants them (plus the existing menus) to the
---  Manager and normal User roles so every logged-in role can use the portal.
---  NOTE: SYSTEM_MENU.MENU_ID is GENERATED ALWAYS AS IDENTITY, so we insert
---  without it and capture the generated id via RETURNING.
--- ===========================================================================
+
+
+
+
+
+
+
 DECLARE
     v_mid NUMBER;
 BEGIN
-    -- 'Raise Ticket'
+
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'raise_ticket';
     EXCEPTION
@@ -516,7 +516,7 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- 'Tickets'
+
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'tickets';
     EXCEPTION
@@ -526,14 +526,14 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- Grant all existing + new menus to Superadmin (1)
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 1, MENU_ID FROM SYSTEM_MENU m
         WHERE NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                            WHERE rmp.ROLE_ID = 1 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Grant Manager (2): Dashboard, Manager Dashboard, Pending Registration,
-    -- Audit Trail, Change Password, Raise Ticket, Tickets
+
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 2, MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
@@ -541,7 +541,7 @@ BEGIN
           AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                            WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Grant normal User (3): Dashboard, Change Password, Raise Ticket, Tickets
+
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 3, MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','change_password','raise_ticket','tickets')
@@ -552,7 +552,6 @@ BEGIN
 END;
 /
 
--- ============================================================
---  All objects created/updated successfully.
---  Test login -> Raise Ticket (Tickets menu) -> View -> Solve.
--- ============================================================
+
+
+

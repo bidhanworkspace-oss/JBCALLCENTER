@@ -1,76 +1,76 @@
--- ===========================================================================
---  JB CALL CENTER - MIGRATION: REMOVE TRIGGERS + SEQUENCES, RENAME BANK ID
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---  Idempotent - safe to re-run.
---
---  WHAT THIS SCRIPT DOES (apply ON TOP of the existing database)
---  ----------------------------------------------------------------------
---  1. Drops the explicit sequences:
---       SEQ_BANK_ID, JB_TICKETS_SEQ, JB_TICKET_RESPONSES_SEQ
---     and the triggers:
---       TRG_JB_TICKETS_BI, TRG_JB_TICKET_RESP_BI
---
---  2. Renames the "Bank ID" columns to "User ID":
---       USERDETAIL.BANKID                -> USERID
---       USER_ACTION_AUDIT_LOG.BANK_ID    -> USERID
---       JB_TICKETS.RAISED_BY_BANK_ID     -> RAISED_BY_USERID
---       JB_TICKET_RESPONSES.RESPONDER_BANK_ID -> RESPONDER_USERID
---     (Oracle automatically keeps constraints/indexes pointing at the new
---      column name. The numeric record id stays USERDETAILID / *_USER_ID.)
---
---  3. Creates a plain counter table + function that replace the sequences:
---       JB_APP_COUNTER (COUNTER_NAME, NEXT_VALUE)
---       FN_GET_NEXT_ID(p_counter_name)  -> next id, row-locked (concurrency
---       safe, no gaps). This is a TABLE + FUNCTION, NOT a
---       CREATE SEQUENCE and NOT a trigger.
---
---  4. Recreates every stored procedure so that:
---       - no procedure references a sequence or a trigger anymore
---       - all bank-named parameters / columns use the new "userid" names
---       - ticket ids / response ids / generated user ids come from
---         FN_GET_NEXT_ID()
---
---  5. Adds two new procedures used by the new "User Unlock" page:
---       SP_GET_USER_BY_MOBILE       (search a customer by mobile number)
---       SP_UNLOCK_USER_BY_MOBILE    (unlock + rotate a temp password)
---
---  6. Adds the "Disable/Enable" menu (URL_NAME = 'disable_enable'), granted to
---     Superadmin + Manager.  The Manager role KEEPS its "user_unlock" grant as
---     well: Unlock stays available to every role that holds the menu, while
---     Disable/Enable is the separate screen for turning an account on or off.
---
---  7. Fixes per-user menu permissions: SP_GET_USER_MENUS,
---     SP_CHECK_USER_MENU_ACCESS, SP_GET_ASSIGNABLE_MENUS and
---     SP_SET_USER_MENU_ACCESS now read USER_MENU_ASSIGNMENT first and only
---     fall back to ROLE_MENU_PERMISSION when a user has no per-user rows.
---     (Before this they read the role table only, so an assign/remove done on
---     the "Assign Menu" screen had no effect on that user's sidebar, and a
---     Manager was refused every assign because Managers had no per-user rows.)
---
---  8. Adds the auto-disable rule: 3 wrong passwords in a row disables the
---     account for EVERY role; only a Manager (User accounts) or a Superadmin
---     (any account) can re-enable it.
---       SP_REGISTER_FAILED_LOGIN / SP_RESET_FAILED_LOGIN / SP_ENABLE_USER
---
---  NOTE about GENERATED ALWAYS AS IDENTITY columns (SYSTEM_ROLE, SYSTEM_MENU,
---  USERDETAIL.USERDETAILID, USER_REGISTRATION, USER_ACTION_AUDIT_LOG.LOG_ID):
---  these are Oracle's built-in identity feature, maintained internally by the
---  engine. They require NO user-created sequence and NO trigger, so they are
---  kept as-is. This script removes every user-created sequence/trigger.
---
---  AFTER RUNNING verify:
---    SELECT sequence_name FROM user_sequences;          -- expect NONE
---    SELECT trigger_name  FROM user_triggers;           -- expect NONE
---    SELECT object_name FROM user_objects WHERE status = 'INVALID';  -- expect NONE
--- ===========================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ===========================================================================
--- 1. DROP SEQUENCES + TRIGGERS (best effort)
--- ===========================================================================
+
+
+
 BEGIN
     EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_BANK_ID';
 EXCEPTION WHEN OTHERS THEN NULL;
@@ -97,9 +97,9 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END;
 /
 
--- ===========================================================================
--- 2. RENAME "BANK ID" COLUMNS -> "USER ID" (guarded)
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -126,12 +126,24 @@ BEGIN
     IF v_cnt > 0 THEN
         EXECUTE IMMEDIATE 'ALTER TABLE JB_TICKET_RESPONSES RENAME COLUMN RESPONDER_BANK_ID TO RESPONDER_USERID';
     END IF;
+
+    SELECT COUNT(*) INTO v_cnt FROM ALL_TAB_COLUMNS
+     WHERE OWNER = USER AND TABLE_NAME = 'USER_REGISTRATION' AND COLUMN_NAME = 'OFFICE_ID';
+    IF v_cnt = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE USER_REGISTRATION ADD (OFFICE_ID VARCHAR2(30))';
+    END IF;
+
+    SELECT COUNT(*) INTO v_cnt FROM ALL_TAB_COLUMNS
+     WHERE OWNER = USER AND TABLE_NAME = 'USERDETAIL' AND COLUMN_NAME = 'OFFICE_ID';
+    IF v_cnt = 0 THEN
+        EXECUTE IMMEDIATE 'ALTER TABLE USERDETAIL ADD (OFFICE_ID VARCHAR2(30))';
+    END IF;
 END;
 /
 
--- ===========================================================================
--- 3. COUNTER TABLE + SEQUENCE-REPLACEMENT FUNCTION
--- ===========================================================================
+
+
+
 DECLARE
     v_cnt NUMBER;
 BEGIN
@@ -176,7 +188,7 @@ EXCEPTION
 END;
 /
 
--- Seed the counters so new ids never collide with existing data.
+
 DECLARE
     v_next NUMBER;
 BEGIN
@@ -213,21 +225,21 @@ BEGIN
 END;
 /
 
--- ===========================================================================
--- 4. RECREATE ALL STORED PROCEDURES (no sequences, no triggers, new names)
--- ===========================================================================
 
--- ---------------------------------------------------------------------------
--- 4a-bis. DISABLE/ENABLE MENU + PER-USER MENU BACK-FILL
---
---   Adds the "Disable/Enable" menu (URL_NAME = 'disable_enable'), grants it
---   to Superadmin + Manager, and drops the obsolete "User Unlock" grant from
---   the Manager role (Managers reach the same screen via Disable/Enable).
---
---   Then copies the role grants of every user that has no explicit
---   USER_MENU_ASSIGNMENT rows yet, so every account is in the per-user model
---   that SP_GET_USER_MENUS / SP_CHECK_USER_MENU_ACCESS read below.
--- ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 DECLARE
     v_cnt       NUMBER;
     v_menu_id   NUMBER;
@@ -250,10 +262,10 @@ BEGIN
                             WHERE x.ROLE_ID = r.ROLE_ID AND x.MENU_ID = v_menu_id);
     END LOOP;
 
-    -- Manager must keep BOTH 'user_unlock' and 'disable_enable':
-    -- Unlock stays open to every role holding the menu grant, and
-    -- Disable/Enable is the separate on/off screen.  Ensure both rather
-    -- than deleting anything, so this block is safe to re-run.
+
+
+
+
     FOR r IN (SELECT ROLE_ID FROM SYSTEM_ROLE WHERE UPPER(ROLE_NAME) = 'MANAGER') LOOP
         FOR mm IN (SELECT MENU_ID FROM SYSTEM_MENU
                     WHERE URL_NAME IN ('user_unlock', 'disable_enable')) LOOP
@@ -277,9 +289,9 @@ SELECT u.USERDETAILID, rmp.MENU_ID, NULL, CURRENT_TIMESTAMP
 COMMIT;
 /
 
--- ---------------------------------------------------------------------------
--- 4a. AUTHENTICATION / PROFILE
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_AUTHENTICATE_USER (
     p_userid          IN VARCHAR2,
     o_user_detail_id  OUT NUMBER,
@@ -307,11 +319,11 @@ EXCEPTION
 END;
 /
 
--- Menu resolution rule used by every menu procedure below:
---   a user holds a menu if USER_MENU_ASSIGNMENT has a row for it; if the user
---   has NO per-user rows at all, fall back to the ROLE_MENU_PERMISSION grants
---   of the user's role.  This is what makes an individual assign/remove on
---   the "Assign Menu" screen actually change that user's sidebar.
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_USER_MENUS (
     p_user_detail_id IN  NUMBER,
     p_menu_cursor    OUT SYS_REFCURSOR
@@ -440,28 +452,100 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4b. REGISTRATION / APPROVAL
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SUBMIT_REGISTRATION (
     p_fullname IN VARCHAR2,
     p_mobile IN VARCHAR2,
     p_email IN VARCHAR2,
     p_nid IN VARCHAR2,
+    p_office_id IN VARCHAR2,
     p_attachment IN VARCHAR2,
     p_success OUT NUMBER,
     p_msg OUT VARCHAR2
 ) AS
+    v_email      VARCHAR2(100);
+    v_mobile     VARCHAR2(20);
+    v_nid        VARCHAR2(30);
+    v_office_id  VARCHAR2(30);
+    v_user_mobile NUMBER;
+    v_user_email  NUMBER;
+    v_reg_mobile  NUMBER;
+    v_reg_email   NUMBER;
 BEGIN
-    INSERT INTO USER_REGISTRATION (FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH)
-    VALUES (p_fullname, p_mobile, p_email, p_nid, p_attachment);
+    v_email     := LOWER(TRIM(p_email));
+    v_mobile    := TRIM(p_mobile);
+    v_nid       := TRIM(p_nid);
+    v_office_id := TRIM(p_office_id);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Mobile number and email address are required.';
+        RETURN;
+    END IF;
+
+    IF v_nid IS NULL
+       OR NOT REGEXP_LIKE(v_nid, '^[0-9]{10}$|^[0-9]{13}$|^[0-9]{17}$') THEN
+        p_success := 0;
+        p_msg     := 'NID number must be exactly 10, 13 or 17 digits.';
+        RETURN;
+    END IF;
+
+    IF v_office_id IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Office ID Number is required.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(CASE WHEN TRIM(MOBILE_NO) = v_mobile THEN 1 END),
+           COUNT(CASE WHEN LOWER(TRIM(EMAIL)) = v_email THEN 1 END)
+      INTO v_user_mobile, v_user_email
+      FROM USERDETAIL;
+
+    IF v_user_mobile > 0 THEN
+        p_success := 0;
+        p_msg     := 'This mobile number is already in use by a registered user.';
+        RETURN;
+    END IF;
+
+    IF v_user_email > 0 THEN
+        p_success := 0;
+        p_msg     := 'This email address is already in use by a registered user.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(CASE WHEN TRIM(MOBILE_NO) = v_mobile THEN 1 END),
+           COUNT(CASE WHEN LOWER(TRIM(EMAIL)) = v_email THEN 1 END)
+      INTO v_reg_mobile, v_reg_email
+      FROM USER_REGISTRATION
+     WHERE STATUS = 'PENDING';
+
+    IF v_reg_mobile > 0 THEN
+        p_success := 0;
+        p_msg     := 'A registration with this mobile number is already awaiting approval. Please contact your manager.';
+        RETURN;
+    END IF;
+
+    IF v_reg_email > 0 THEN
+        p_success := 0;
+        p_msg     := 'A registration with this email address is already awaiting approval. Please contact your manager.';
+        RETURN;
+    END IF;
+
+    INSERT INTO USER_REGISTRATION (FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH)
+    VALUES (p_fullname, v_mobile, v_email, v_nid, v_office_id, p_attachment);
 
     p_success := 1;
     p_msg     := 'Registration submitted successfully. Awaiting approval.';
 EXCEPTION
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'This mobile number or email address is already in use.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
@@ -470,7 +554,7 @@ CREATE OR REPLACE PROCEDURE SP_GET_PENDING_REGISTRATIONS (
 ) AS
 BEGIN
     OPEN p_cursor FOR
-        SELECT REGISTRATION_ID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH
+        SELECT REGISTRATION_ID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH, OFFICE_ID
         FROM USER_REGISTRATION
         WHERE STATUS = 'PENDING'
         ORDER BY REGISTRATION_ID DESC;
@@ -490,10 +574,12 @@ CREATE OR REPLACE PROCEDURE SP_APPROVE_REGISTRATION (
     v_mobile   VARCHAR2(20);
     v_email    VARCHAR2(100);
     v_nid      VARCHAR2(30);
+    v_office_id VARCHAR2(30);
     v_attach   VARCHAR2(255);
     v_user_role_id NUMBER;
     v_manager_role VARCHAR2(50);
     v_new_user_id  NUMBER;
+    v_count    NUMBER;
 BEGIN
     SELECT UPPER(r.ROLE_NAME) INTO v_manager_role
     FROM USERDETAIL u
@@ -508,26 +594,45 @@ BEGIN
 
     SELECT ROLE_ID INTO v_user_role_id FROM SYSTEM_ROLE WHERE UPPER(ROLE_NAME) = 'USER';
 
-    SELECT FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH
-    INTO v_fullname, v_mobile, v_email, v_nid, v_attach
+    SELECT FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH
+    INTO v_fullname, v_mobile, v_email, v_nid, v_office_id, v_attach
     FROM USER_REGISTRATION
     WHERE REGISTRATION_ID = p_reg_id AND STATUS = 'PENDING';
+
+    v_email  := LOWER(TRIM(v_email));
+    v_mobile := TRIM(v_mobile);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'This registration has no email address or mobile number.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(1) INTO v_count
+      FROM USERDETAIL
+     WHERE LOWER(TRIM(EMAIL)) = v_email
+        OR TRIM(MOBILE_NO) = v_mobile;
+    IF v_count > 0 THEN
+        p_success := 0;
+        p_msg     := 'A user with this email address or mobile number already exists. The registration cannot be approved.';
+        RETURN;
+    END IF;
 
     o_userid    := 'JB' || FN_GET_NEXT_ID('BANK_USER_SEQ');
     o_user_email := v_email;
 
     INSERT INTO USERDETAIL (
-        USERID, FULLNAME, MOBILE_NO, EMAIL, NID, ATTACHMENT_PATH,
+        USERID, FULLNAME, MOBILE_NO, EMAIL, NID, OFFICE_ID, ATTACHMENT_PATH,
         USERPASSWORD, ROLE_ID, IS_FIRST_LOGIN, USERSTATUS, FAILED_ATTEMPTS,
         APPROVED_BY_USER_ID, APPROVED_AT
     ) VALUES (
-        o_userid, v_fullname, v_mobile, v_email, v_nid, v_attach,
+        o_userid, v_fullname, v_mobile, v_email, v_nid, v_office_id, v_attach,
         p_temp_password, v_user_role_id, 1, 'Enabled', 0,
         p_manager_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
-    -- Default menu grants: a newly approved user starts with ONLY
-    -- Dashboard + Change Password. More menus are added via Assign Menu.
+
+
     FOR mc IN (
         SELECT MENU_ID FROM SYSTEM_MENU
         WHERE URL_NAME IN ('dashboard', 'change_password')
@@ -547,7 +652,11 @@ EXCEPTION
         p_msg     := 'Registration record or role definition missing.';
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'A user with this email address or mobile number already exists.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
@@ -566,6 +675,9 @@ CREATE OR REPLACE PROCEDURE SP_CREATE_MANAGER_BY_SUPERADMIN (
     v_role_id           NUMBER;
     v_superadmin_role   VARCHAR2(50);
     v_new_user_id       NUMBER;
+    v_email             VARCHAR2(100);
+    v_mobile            VARCHAR2(20);
+    v_count             NUMBER;
 BEGIN
     SELECT UPPER(r.ROLE_NAME) INTO v_superadmin_role
       FROM USERDETAIL u
@@ -575,6 +687,25 @@ BEGIN
     IF v_superadmin_role != 'SUPERADMIN' THEN
         p_success := 0;
         p_msg     := 'Access Denied: Only Superadmin can create Manager accounts.';
+        RETURN;
+    END IF;
+
+    v_email  := LOWER(TRIM(p_email));
+    v_mobile := TRIM(p_mobile);
+
+    IF v_email IS NULL OR v_mobile IS NULL THEN
+        p_success := 0;
+        p_msg     := 'Mobile number and email address are required.';
+        RETURN;
+    END IF;
+
+    SELECT COUNT(1) INTO v_count
+      FROM USERDETAIL
+     WHERE LOWER(TRIM(EMAIL)) = v_email
+        OR TRIM(MOBILE_NO) = v_mobile;
+    IF v_count > 0 THEN
+        p_success := 0;
+        p_msg     := 'A user with this email address or mobile number already exists.';
         RETURN;
     END IF;
 
@@ -588,7 +719,7 @@ BEGIN
         USERID, FULLNAME, MOBILE_NO, EMAIL, NID, IMAGE_PATH, USERPASSWORD,
         ROLE_ID, IS_FIRST_LOGIN, USERSTATUS, APPROVED_BY_USER_ID, APPROVED_AT
     ) VALUES (
-        o_userid, p_fullname, p_mobile, p_email, p_nid, p_image_path, p_temp_password,
+        o_userid, p_fullname, v_mobile, v_email, p_nid, p_image_path, p_temp_password,
         v_role_id, 1, 'Enabled', p_superadmin_user_id, CURRENT_TIMESTAMP
     ) RETURNING USERDETAILID INTO v_new_user_id;
 
@@ -616,13 +747,17 @@ EXCEPTION
         p_msg     := 'Superadmin or Manager role definition missing.';
     WHEN OTHERS THEN
         p_success := 0;
-        p_msg     := SQLERRM;
+        IF SQLCODE = -1 THEN
+            p_msg := 'A user with this email address or mobile number already exists.';
+        ELSE
+            p_msg := SQLERRM;
+        END IF;
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4c. UNLOCK / PASSWORD
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_UNLOCK_USER_BY_MANAGER (
     p_userid IN VARCHAR2,
     p_temp_hashed_password IN VARCHAR2,
@@ -741,9 +876,9 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4c-bis. AUTO-DISABLE AFTER 3 FAILED LOGIN ATTEMPTS (every role)
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_REGISTER_FAILED_LOGIN (
     p_user_detail_id IN  NUMBER,
     p_max_attempts   IN  NUMBER,
@@ -803,12 +938,12 @@ EXCEPTION
 END;
 /
 
--- Policy: Superadmin may enable ANY account.  A Manager may only enable an
--- account whose role is exactly 'User' - never a Manager or a Superadmin.
--- ---------------------------------------------------------------------------
---  Enforce the enable/disable policy in the database itself, so no caller
---  (web view, background job or ad-hoc SQL session) can bypass it.
--- ---------------------------------------------------------------------------
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SET_USER_STATUS (
     p_actor_user_detail_id  IN NUMBER,
     p_target_user_detail_id IN NUMBER,
@@ -887,6 +1022,7 @@ EXCEPTION
         p_success := 0;
         p_msg     := SQLERRM;
 END;
+/
 
 CREATE OR REPLACE PROCEDURE SP_ENABLE_USER (
     p_actor_user_detail_id  IN NUMBER,
@@ -902,9 +1038,9 @@ BEGIN
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4d. DASHBOARD LISTS
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_ACTIVE_USERS (
     p_out_cursor OUT SYS_REFCURSOR
 ) AS
@@ -942,9 +1078,9 @@ BEGIN
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4e. TICKETS
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_RAISE_TICKET (
     p_raised_by_user_detail_id IN NUMBER,
     p_raised_by_userid IN VARCHAR2,
@@ -1060,9 +1196,9 @@ BEGIN
 END;
 /
 
--- NOTE: single-cursor + EXECUTE IMMEDIATE is required. python-oracledb (thin)
--- hangs on MULTIPLE OUT SYS_REFCURSOR vars, and on a NUMBER as the first bind
--- of a ref-cursor call. The Django app passes TICKET_ID as a string.
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_TICKET_BY_ID (
     p_ticket_id     IN NUMBER,
     o_ticket_cursor OUT SYS_REFCURSOR
@@ -1110,7 +1246,7 @@ CREATE OR REPLACE PROCEDURE SP_RESPOND_TICKET (
 BEGIN
     o_success := 0;
 
-    -- Bank Support gate
+
     SELECT UPPER(NVL(r.ROLE_NAME, ''))
       INTO v_responder_role
       FROM USERDETAIL u
@@ -1183,9 +1319,9 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- 4f. MENU-BASED ACCESS
--- ---------------------------------------------------------------------------
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_ASSIGNABLE_MENUS (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -1300,12 +1436,12 @@ EXCEPTION
 END;
 /
 
--- Policy:
---   * only a Superadmin or a Manager may call it;
---   * a Manager may only target an account whose role is exactly 'User'
---     (Manager, Bank Support and Superadmin accounts are Superadmin-only);
---   * nobody may change their own menus;
---   * you may only grant a menu that you hold yourself.
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_SET_USER_MENU_ACCESS (
     p_actor_user_id  IN NUMBER,
     p_target_userid  IN VARCHAR2,
@@ -1504,27 +1640,32 @@ EXCEPTION
 END;
 /
 
--- ===========================================================================
--- 5. NEW PROCEDURES FOR THE "USER UNLOCK" SEARCH PAGE
--- ===========================================================================
 
--- ---------------------------------------------------------------------------
--- SP_GET_USER_BY_MOBILE
---   Returns the customer's details + status searched by mobile number.
---   Columns: userid, fullname, mobile_no, email, userstatus, failed_attempts, role_name
--- ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_GET_USER_BY_MOBILE (
     p_mobile   IN VARCHAR2,
     o_cursor   OUT SYS_REFCURSOR
 ) AS
 BEGIN
     OPEN o_cursor FOR
-        SELECT u.USERID,
+        SELECT u.USERDETAILID,
+               u.USERID,
                u.FULLNAME,
                u.MOBILE_NO,
                u.EMAIL,
                u.USERSTATUS,
                u.FAILED_ATTEMPTS,
+               u.ROLE_ID,
                NVL(r.ROLE_NAME, 'No Role')
           FROM USERDETAIL u
           LEFT JOIN SYSTEM_ROLE r ON u.ROLE_ID = r.ROLE_ID
@@ -1533,12 +1674,12 @@ BEGIN
 END;
 /
 
--- ---------------------------------------------------------------------------
--- SP_UNLOCK_USER_BY_MOBILE
---   Unlocks the newest matching user for the mobile number and installs a
---   temporary password (caller emails it).
---   Returns o_userid + o_email for the notification.
--- ---------------------------------------------------------------------------
+
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE SP_UNLOCK_USER_BY_MOBILE (
     p_mobile               IN  VARCHAR2,
     p_temp_hashed_password IN  VARCHAR2,
@@ -1604,10 +1745,121 @@ END;
 
 COMMIT;
 
--- ===========================================================================
---  DONE. Verify with:
---    SELECT sequence_name FROM user_sequences;   -- expect no rows
---    SELECT trigger_name  FROM user_triggers;    -- expect no rows
---    SELECT object_name FROM user_objects WHERE status = 'INVALID';   -- none
---  Then run  manage.py check on Django and re-login with SA001 / Admin@123.
--- ===========================================================================
+
+
+
+
+DECLARE
+    v_cnt NUMBER;
+BEGIN
+    UPDATE USERDETAIL u
+       SET u.EMAIL = LOWER(u.USERID) || '@jbcallcenter.local'
+     WHERE EXISTS (SELECT 1
+                     FROM USERDETAIL d
+                    WHERE LOWER(TRIM(d.EMAIL)) = LOWER(TRIM(u.EMAIL))
+                      AND d.USERDETAILID < u.USERDETAILID);
+
+    UPDATE USER_REGISTRATION r
+       SET r.EMAIL = 'user' || r.REGISTRATION_ID || '@jbcallcenter.local'
+     WHERE EXISTS (SELECT 1
+                     FROM USER_REGISTRATION d
+                    WHERE LOWER(TRIM(d.EMAIL)) = LOWER(TRIM(r.EMAIL))
+                      AND d.REGISTRATION_ID < r.REGISTRATION_ID);
+
+    SELECT COUNT(1) INTO v_cnt
+      FROM (SELECT TRIM(MOBILE_NO) AS MOBILE_NO
+              FROM USERDETAIL
+             WHERE MOBILE_NO IS NOT NULL
+             GROUP BY TRIM(MOBILE_NO)
+            HAVING COUNT(*) > 1);
+    IF v_cnt > 0 THEN
+        RAISE_APPLICATION_ERROR(-20001, 'USERDETAIL still has duplicate mobile numbers.');
+    END IF;
+
+    SELECT COUNT(1) INTO v_cnt
+      FROM (SELECT TRIM(MOBILE_NO) AS MOBILE_NO
+              FROM USER_REGISTRATION
+             WHERE MOBILE_NO IS NOT NULL
+             GROUP BY TRIM(MOBILE_NO)
+            HAVING COUNT(*) > 1);
+    IF v_cnt > 0 THEN
+        RAISE_APPLICATION_ERROR(-20002, 'USER_REGISTRATION still has duplicate mobile numbers.');
+    END IF;
+
+    SELECT COUNT(1) INTO v_cnt
+      FROM (SELECT LOWER(TRIM(EMAIL)) AS EMAIL_LC
+              FROM USERDETAIL
+             WHERE EMAIL IS NOT NULL
+             GROUP BY LOWER(TRIM(EMAIL))
+            HAVING COUNT(*) > 1);
+    IF v_cnt > 0 THEN
+        RAISE_APPLICATION_ERROR(-20003, 'USERDETAIL still has duplicate email addresses.');
+    END IF;
+
+    SELECT COUNT(1) INTO v_cnt
+      FROM (SELECT LOWER(TRIM(EMAIL)) AS EMAIL_LC
+              FROM USER_REGISTRATION
+             WHERE EMAIL IS NOT NULL
+             GROUP BY LOWER(TRIM(EMAIL))
+            HAVING COUNT(*) > 1);
+    IF v_cnt > 0 THEN
+        RAISE_APPLICATION_ERROR(-20004, 'USER_REGISTRATION still has duplicate email addresses.');
+    END IF;
+
+    COMMIT;
+END;
+/
+
+DECLARE
+    PROCEDURE make_not_null(
+        p_table IN VARCHAR2,
+        p_col   IN VARCHAR2
+    ) IS
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE ' || p_table || ' MODIFY (' || p_col || ' NOT NULL)';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE != -1442 THEN
+                RAISE;
+            END IF;
+    END;
+BEGIN
+    make_not_null('USERDETAIL', 'EMAIL');
+    make_not_null('USERDETAIL', 'MOBILE_NO');
+    make_not_null('USER_REGISTRATION', 'EMAIL');
+    make_not_null('USER_REGISTRATION', 'MOBILE_NO');
+    COMMIT;
+END;
+/
+
+DECLARE
+    PROCEDURE create_unique_index(
+        p_name  IN VARCHAR2,
+        p_table IN VARCHAR2,
+        p_expr  IN VARCHAR2
+    ) IS
+    BEGIN
+        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX ' || p_name ||
+                          ' ON ' || p_table || ' (' || p_expr || ')';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE != -955 THEN
+                RAISE;
+            END IF;
+    END;
+BEGIN
+    create_unique_index('UQ_USERDETAIL_EMAIL',  'USERDETAIL',       'LOWER(TRIM(EMAIL))');
+    create_unique_index('UQ_USERDETAIL_MOBILE', 'USERDETAIL',       'TRIM(MOBILE_NO)');
+    create_unique_index('UQ_USER_REG_EMAIL',     'USER_REGISTRATION', 'LOWER(TRIM(EMAIL))');
+    create_unique_index('UQ_USER_REG_MOBILE',    'USER_REGISTRATION', 'TRIM(MOBILE_NO)');
+    COMMIT;
+END;
+/
+
+
+
+
+
+
+
+

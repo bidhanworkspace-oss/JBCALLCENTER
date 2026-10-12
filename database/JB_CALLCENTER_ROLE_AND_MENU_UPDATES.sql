@@ -1,44 +1,7 @@
--- ===========================================================================
---  *** SUPERSEDED - DO NOT USE ***
---  This legacy patch has been folded into:
---    - JB_CALLCENTER_SETUP.sql      (brand-new install, no triggers/sequences)
---    - JB_CALLCENTER_MIGRATION_NO_TRIGGER_SEQUENCE.sql  (upgrade of existing DB)
---  Use one of those two files instead of this one.
--- ===========================================================================
---  JB CALL CENTER - ASSIGN ROLE / USER Unlock MENUS + ROLE PROCEDURES
--- ---------------------------------------------------------------------------
---  Run as the JBCALLCENTER schema user (the same user Django connects with).
---  Idempotent - safe to re-run.
---
---  What this script does
---    A. Registers two new top-level menus:
---         - 'User Unlock'  (user_unlock)  : locked-account unlock page
---         - 'Assign Role'  (assign_role)  : assign / remove roles on users
---    B. Registers two hidden permission rows (child of Manager Dashboard so
---       the sidebar never renders them, but SP_CHECK_USER_MENU_ACCESS can
---       authorise the action URLs used by the Approve / Unlock buttons):
---         - approve_user
---         - unlock_user
---    C. Grants:
---         Superadmin : every menu
---         Manager    : existing menus + user_unlock, assign_role,
---                      approve_user, unlock_user
---         User       : unchanged (NO assign_role, NO user_unlock)
---    D. New procedures:
---         SP_GET_ROLES
---         SP_GET_USERS_FOR_ROLE_ASSIGN
---         SP_ASSIGN_USER_ROLE
---    E. Replaces SP_GET_USER_DETAILS / SP_GET_ACTIVE_USERS with LEFT JOIN
---       versions so users whose role has been removed (ROLE_ID NULL) still
---       authenticate and appear in lists.
--- ===========================================================================
 
 WHENEVER SQLERROR CONTINUE
 /
 
--- ---------------------------------------------------------------------------
--- A + B + C. MENUS AND GRANTS
--- ---------------------------------------------------------------------------
 DECLARE
     v_mgr_mid NUMBER;
     v_mid     NUMBER;
@@ -52,7 +15,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mgr_mid;
     END;
 
-    -- 'User Unlock' (visible sidebar entry)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'user_unlock';
     EXCEPTION
@@ -62,7 +24,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- 'Assign Role' (visible sidebar entry)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'assign_role';
     EXCEPTION
@@ -72,7 +33,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- Hidden permission row: approve_user (child => never rendered by sidebar)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'approve_user';
     EXCEPTION
@@ -82,7 +42,6 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- Hidden permission row: unlock_user (child => never rendered by sidebar)
     BEGIN
         SELECT MENU_ID INTO v_mid FROM SYSTEM_MENU WHERE URL_NAME = 'unlock_user';
     EXCEPTION
@@ -92,13 +51,11 @@ BEGIN
             RETURNING MENU_ID INTO v_mid;
     END;
 
-    -- Superadmin (1): every menu
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 1, m.MENU_ID FROM SYSTEM_MENU m
         WHERE NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 1 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- Manager (2): existing + new management menus
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 2, m.MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','manager_dashboard','pending_registration',
@@ -107,8 +64,6 @@ BEGIN
           AND NOT EXISTS (SELECT 1 FROM ROLE_MENU_PERMISSION rmp
                           WHERE rmp.ROLE_ID = 2 AND rmp.MENU_ID = m.MENU_ID);
 
-    -- User (3): explicitly NEVER gets assign_role / user_unlock /
-    --           approve_user / unlock_user.
     INSERT INTO ROLE_MENU_PERMISSION (ROLE_ID, MENU_ID)
         SELECT 3, m.MENU_ID FROM SYSTEM_MENU m
         WHERE m.URL_NAME IN ('dashboard','change_password','raise_ticket','tickets')
@@ -119,8 +74,6 @@ BEGIN
 END;
 /
 
--- Safety: make sure a normal User never holds the admin menus even if they
--- were granted earlier by mistake.
 DELETE FROM ROLE_MENU_PERMISSION
  WHERE ROLE_ID = 3
    AND MENU_ID IN (SELECT MENU_ID FROM SYSTEM_MENU
@@ -130,9 +83,6 @@ DELETE FROM ROLE_MENU_PERMISSION
                                        'audit_trail','create_manager'));
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- D1. SP_GET_ROLES
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_GET_ROLES (
     o_cursor OUT SYS_REFCURSOR
 ) AS
@@ -144,12 +94,6 @@ BEGIN
 END;
 /
 
--- ---------------------------------------------------------------------------
--- D2. SP_GET_USERS_FOR_ROLE_ASSIGN
---     Superadmin : sees EVERY user (including managers / superadmins).
---     Manager    : sees every user except Superadmins.
---     Columns    : bank_id, fullname, email, status, role_id, role_name
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_GET_USERS_FOR_ROLE_ASSIGN (
     p_actor_user_id IN NUMBER,
     o_cursor        OUT SYS_REFCURSOR
@@ -210,16 +154,6 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- D3. SP_ASSIGN_USER_ROLE
---     p_role_id = NULL  =>  remove the role from the user.
---     Rules:
---       - only Superadmin / Manager may call it
---       - nobody may change their own role
---       - Superadmin may assign any role to anyone (except self)
---       - Manager   may only act on non-Superadmin users and may not grant
---                   the Superadmin role
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_ASSIGN_USER_ROLE (
     p_actor_user_id IN NUMBER,
     p_target_bank_id IN VARCHAR2,
@@ -304,9 +238,6 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- E1. SP_GET_USER_DETAILS (LEFT JOIN so role-less users still log in fine)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_GET_USER_DETAILS (
     p_user_id     IN  NUMBER,
     o_fullname    OUT VARCHAR2,
@@ -337,9 +268,6 @@ EXCEPTION
 END;
 /
 
--- ---------------------------------------------------------------------------
--- E2. SP_GET_ACTIVE_USERS (LEFT JOIN so role-less users stay visible)
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE SP_GET_ACTIVE_USERS (
     p_out_cursor OUT SYS_REFCURSOR
 ) AS
@@ -361,8 +289,3 @@ BEGIN
 END;
 /
 
--- ===========================================================================
---  Verify afterwards:
---    SELECT object_name, object_type FROM user_objects WHERE status = 'INVALID';
---  Users must RE-LOGIN (or change password) to pick up the new menus.
--- ===========================================================================

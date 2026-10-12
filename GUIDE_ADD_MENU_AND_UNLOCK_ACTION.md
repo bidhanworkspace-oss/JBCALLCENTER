@@ -10,17 +10,49 @@ following the same pattern as the existing **User Unlock** page:
 | View logic        | `login/views.py`                                                               |
 | URL               | `config/urls.py`                                                               |
 | HTML page         | `templates/login/<name>.html`                                                  |
-| API integration   | **Your** custom API class/method (e.g. `API().GetUserByMobileNo(mobileno)`) — see below |
+| API integration   | **Your** custom API class/method — see below                                    |
 
 > Your API work is NOT done here. The view below shows where the `API()` class is
-> *called*; you write the class and its methods yourself. The `user_unlock` page is
-> already converted to this flow — it reads `mobileno` (POST/GET or the `<str:mobileno>`
-> path arg) and calls `api.GetUserByMobileNo(mobileno)`, `api.GetUserStatus()`, and on
-> POST `api.UpdateUserStatus(...)`. Create `login/api.py` with an `API` class exposing
-> those methods (plus `GetUserStatusByStatusName`), and for the manager's one-click
-> unlock add `UnlockUserByBankID(bank_id, hashed_temp_pwd)` returning
-> `{'success': bool, 'user_email': str, 'msg': str}`. Until the class exists, those
-> pages show a friendly message with the import error instead of crashing.
+> *called*; you write the class and its methods yourself. Create `login/api.py`
+> with an `API` class exposing the methods each screen needs, plus
+> `UnlockUserByBankID(bank_id, hashed_temp_pwd)` returning
+> `{'success': bool, 'user_email': str, 'msg': str}` for the manager's one-click
+> unlock. Until the class exists, those pages show a friendly message with the
+> import error instead of crashing.
+>
+> **The screens that take a mobile number own different users — keep them
+> apart, because their data comes from different places:**
+>
+> | Screen | View | Users | Where the data comes from |
+> |---|---|---|---|
+> | Disable/Enable | `login.views.disable_enable` | **JB Call Center** | Oracle `USERDETAIL` — `api.GetUserByMobileNo(mobileno)`, `api.GetUserStatus()`, `api.SetUserStatus(...)` |
+> | User Unlock | `login.views.user_unlock` | **JB Call Center** | Oracle `USERDETAIL` — `api.GetUserByMobileNo(mobileno)` to search, `api.UnlockUserByMobileNo(mobileno, hashed_pwd)` → `SP_UNLOCK_USER_BY_MOBILE` to unlock. No HTTP call, so it keeps working while the eJanata API is down |
+> | eJanata User Unlock | `login.views.ejanata_user_unlock` | **eJanata** | The eJanata customer API — `api.GeteJanataUserByMobileNo(...)` to search, `api.ejanata_user_unlock(...)` to release |
+> | Disable eJanata User | `login.views.disable_ejanata_user` | **eJanata** | The eJanata customer API — `api.GeteJanataUserByMobileNo(...)` to search, `api.ejanata_user_disable(...)` to block |
+> | Acc Statement | `login.views.acc_statement` | **eJanata / core banking** | `api.GetAccountStatement(accno)` — Debit/Credit transaction list |
+>
+> An eJanata user has **no row** in `USERDETAIL`, so never call
+> `GetUserByMobileNo` (or any `USERDETAIL` query) from `ejanata_user_unlock` or
+> `disable_ejanata_user`: on a number collision it would return a different,
+> unrelated local account. Conversely `disable_enable` and `user_unlock` must
+> never call the eJanata API.
+>
+> **Three things belong to one screen and must never be shared with another:**
+> the URL `name=`, the `SYSTEM_MENU.URL_NAME` and the template. `user_unlock`
+> and `ejanata_user_unlock` once shared all three, which silently deleted the
+> call center unlock screen — the eJanata view took the `'user_unlock'` route
+> name and menu, and nothing then answered to `api.UnlockUserByMobileNo` any
+> more. Each screen now has its own: `/user-unlock/` +
+> `login/templates/login/user_unlock.html` vs `/ejanata-user-unlock/` +
+> `login/templates/login/ejanata_user_unlock.html`. See
+> `database/JB_CALLCENTER_EJANATA_USER_UNLOCK.sql` for the menu row.
+>
+> **Never put a technical error on screen.** These messages are read by call
+> centre staff, so they carry no endpoint URL, no HTTP status, no raw response
+> body and no Python exception — `API._ejanata_post` logs all of that with
+> `logger.error` and returns one of `EJANATA_UNAVAILABLE_MESSAGE` /
+> `EJANATA_VERIFY_FAILED_MESSAGE` instead. Keep new failures on that pattern:
+> log the detail, show a sentence an operator can act on.
 
 ---
 
@@ -86,6 +118,10 @@ def manage_user(request):
 
 
 # ===== lookup: receives the mobile number, calls YOUR API =====
+# NOTE: this example is for a page that owns JB Call Center users, which do
+# live in USERDETAIL. If your page is about eJanata users instead, swap
+# GetUserByMobileNo for the eJanata customer API (GeteJanataUserByMobileNo) -
+# see the ownership table at the top of this guide.
 @permission_required_sp('manage_user_lookup')
 def manage_user_lookup(request):
     from .your_api_module import API          # your custom API class
@@ -194,15 +230,94 @@ To add *any* new menu end-to-end:
 
 ---
 
-## 5. Reference — how the existing User Unlock is wired
+## 5. Reference — how the two User Unlock screens are wired
+
+### 5a. User Unlock — call center account (Oracle `USERDETAIL`)
 
 | Concern      | Procedure / URL / view                                       |
 |--------------|--------------------------------------------------------------|
-| Search       | same view, reads `mobileno` (`request.POST`/`GET`/path) → `api.GetUserByMobileNo(mobileno)` |
-| Action       | same view, POST `btnupdateuser` → `api.GetUserStatusByStatusName(...)` + `api.UpdateUserStatus(...)` |
-| Page view    | `login.views.user_unlock` → `templates/login/user_unlock.html` |
+| Input        | same view, reads `mobileno` (`request.POST`/`GET`/path)      |
+| Search       | POST `btnfetchuser` → `api.GetUserByMobileNo(mobileno)` → the matching `USERDETAIL` row(s), shown before anything is changed |
+| Action       | same view, POST `btnunlockuser` → `api.UnlockUserByMobileNo(mobileno, hashed_pwd)` → `SP_UNLOCK_USER_BY_MOBILE` (re-enables, clears `FAILED_ATTEMPTS`, installs a temp password, which is emailed to the account) |
+| Page view    | `login.views.user_unlock` → `login/templates/login/user_unlock.html` |
 | URLs         | `/user-unlock/` and `/user-unlock/<str:mobileno>/`           |
 | Permissions  | `SYSTEM_MENU.URL_NAME = 'user_unlock'` via `ROLE_MENU_PERMISSION`/`USER_MENU_ASSIGNMENT` |
 
-If your new page reuses the unlock/manage action, add its own `SYSTEM_MENU` child
-rows (e.g. `manage_user_lookup`) and decorate its views — same as the table above.
+### 5b. eJanata User Unlock — application user of the other system (HTTP)
+
+| Concern      | Procedure / URL / view                                       |
+|--------------|--------------------------------------------------------------|
+| Input        | same view, reads `mobileno` (`request.POST`/`GET`/path)      |
+| Search       | POST `btnfetchuser` → `api.GeteJanataUserByMobileNo(...)` → the eJanata customer, shown with its eJanata status flags |
+| Action       | same view, POST `btnunlockuser` → `api.ejanata_user_unlock(...)` → the eJanata unlock endpoint (`EJANATA_UNLOCK_USER_ENDPOINT`) |
+| Page view    | `login.views.ejanata_user_unlock` → `login/templates/login/ejanata_user_unlock.html` |
+| URLs         | `/ejanata-user-unlock/` and `/ejanata-user-unlock/<str:mobileno>/` |
+| Permissions  | `SYSTEM_MENU.URL_NAME = 'ejanata_user_unlock'` (see `database/JB_CALLCENTER_EJANATA_USER_UNLOCK.sql`) |
+
+Both screens take a mobile number and both have a search step, which is exactly
+why they must not share a route name, a menu or a template. The rule to copy:
+look the user up **only** in the system that owns it, then act there —
+`GetUserByMobileNo` for a call center account, `GeteJanataUserByMobileNo` for an
+eJanata one. A number can exist on both sides, and the wrong lookup then shows
+the wrong person.
+
+---
+
+## 6. Restricting a page to SuperAdmin only
+
+Granting the menu to the Superadmin role is **not** enough on its own:
+`USER_MENU_ASSIGNMENT` wins over `ROLE_MENU_PERMISSION`, so a Superadmin or a
+Manager could later hand the page to anyone from the Assign Menu screen.
+
+DB-backed screens are safe because the Oracle procedure re-checks the role
+(`SP_SET_USER_STATUS`, `SP_CREATE_MANAGER_BY_SUPERADMIN`). A screen that acts on
+**another** application over HTTP has no such procedure, so the role has to be
+checked in the view as well:
+
+```python
+from functools import wraps
+
+def superadmin_required(view_func):
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        role = (request.session.get('JB_RoleName') or '').strip().upper()
+        if role not in ('SUPERADMIN',):
+            messages.error(request, "Access Denied: This section is restricted to SuperAdmin.")
+            return redirect('dashboard')
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+
+@permission_required_sp('disable_ejanata_user')   # 1. the menu grant
+@superadmin_required                              # 2. and the role
+def disable_ejanata_user(request, mobileno=''):
+    ...
+```
+
+Order matters: `permission_required_sp` must be the **outer** decorator, so the
+menu check runs first and a user with neither grant still gets the normal
+"Access Denied" redirect. This is the pattern both SuperAdmin-only screens use
+(`disable_ejanata_user`, `acc_statement`) — see
+`database/JB_CALLCENTER_EJANATA_DISABLE_AND_ACC_STATEMENT.sql`.
+
+---
+
+## 7. Building a screen before its API exists
+
+An endpoint path that is not known yet does not have to block the screen. Keep
+the path in settings, empty by default (`EJANATA_DISABLE_USER_ENDPOINT`,
+`EJANATA_ACC_STATEMENT_ENDPOINT`), and have the API method decide:
+
+* **Read-only screens** can serve clearly labelled placeholder rows so the table
+  can be finished and reviewed first. Mark them (`is_sample=True`) and say so
+  above the table — a placeholder transaction that looks real is worse than no
+  table at all. `Acc Statement` does this via `SAMPLE_TRANSACTIONS` in
+  `login/api.py`; it disappears as soon as the real endpoint is set.
+* **Screens that change data** must not fake a success. An unconfigured endpoint
+  returns a clear "not configured" message instead of calling a guessed URL, so
+  the button can never appear to have worked.
+
+When the live response arrives, only the field mapping needs updating
+(`API._normalize_statement_rows`). Keep it tolerant of casing — the eJanata
+responses mix `mobileno` and `TxnDate` styles — and treat an unrecognised value
+as unclassified rather than guessing.

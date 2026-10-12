@@ -12,24 +12,31 @@
 
   /* ===== menu tray ===== */
   .tray { position: sticky; top: 84px; }
+  #menuTray {
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+    padding-right: .25rem;
+    scrollbar-width: thin;
+  }
+  #menuTray::-webkit-scrollbar { width: 4px; }
+  #menuTray::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 2px; }
   .menu-chip {
     display: flex; align-items: center; gap: .6rem;
-    padding: .65rem .8rem; margin-bottom: .6rem;
-    border-radius: 11px; background: #fbfdfe;
+    padding: .55rem .7rem; margin-bottom: .45rem;
+    border-radius: 10px; background: #fbfdfe;
     border: 1.5px solid var(--line); cursor: grab;
-    transition: transform .15s, box-shadow .18s, border-color .18s, opacity .18s;
+    transition: transform .15s, box-shadow .18s, border-color .18s, opacity .18s, background .15s;
     user-select: none;
   }
-  .menu-chip:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+  .menu-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); background: #f5f9fc; }
   .menu-chip.dragging { opacity: .45; border-style: dashed; border-color: var(--sky-500); }
-  .menu-chip .mc-name { font-weight: 700; font-size: .85rem; color: var(--sky-900); flex: 1; min-width: 0; }
-  .menu-chip .mc-url { font-size: .69rem; color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-chip .mc-name { font-weight: 700; font-size: .82rem; color: var(--sky-900); flex: 1; min-width: 0; line-height: 1.25; }
   .menu-chip .mc-dot {
-    flex: none; width: 9px; height: 9px; border-radius: 50%;
+    flex: none; width: 8px; height: 8px; border-radius: 50%;
     background: var(--sky-500); opacity: .85;
-    box-shadow: 0 0 0 3px rgba(43,159,224,.14);
+    box-shadow: 0 0 0 2px rgba(43,159,224,.14);
   }
-  .menu-chip.droppable-over { border-color: var(--sky-500); box-shadow: 0 0 0 3px rgba(43,159,224,.14); }
+  .menu-chip.droppable-over { border-color: var(--sky-500); box-shadow: 0 0 0 3px rgba(43,159,224,.14); background: #eef6fb; }
 
   /* ===== search ===== */
   .search-box { margin-bottom: 1rem; }
@@ -64,17 +71,22 @@
   .uc-actions { display: flex; align-items: center; gap: .4rem; flex: none; }
 
   .uc-menus {
-    display: flex; flex-wrap: wrap; gap: .45rem;
-    padding: .7rem 1rem; min-height: 46px;
-    align-items: center;
+    display: flex; flex-wrap: wrap; gap: .4rem;
+    padding: .55rem .8rem; min-height: 40px;
+    max-height: 120px; overflow-y: auto;
+    align-items: flex-start;
+    align-content: flex-start;
+    scrollbar-width: thin;
   }
+  .uc-menus::-webkit-scrollbar { width: 3px; }
+  .uc-menus::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 2px; }
   .uc-menus-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-right: .15rem; }
 
   .acc-chip {
-    display: inline-flex; align-items: center; gap: .35rem;
-    padding: .28rem .55rem .28rem .7rem; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: .25rem;
+    padding: .2rem .45rem .2rem .55rem; border-radius: 999px;
     background: #eef6fb; border: 1px solid #d6e9f3; color: var(--sky-900);
-    font-size: .74rem; font-weight: 700; user-select: none;
+    font-size: .7rem; font-weight: 700; user-select: none;
   }
   .acc-chip .remove-x {
     display: grid; place-items: center;
@@ -125,7 +137,10 @@
         </div>
         <span class="badge badge-info">{{ assignable_menus|length }}</span>
       </div>
-      <div class="panel-body">
+        <div class="panel-body">
+        <div class="search-box" style="margin-bottom:.6rem;">
+          <input type="search" id="menuSearch" placeholder="Search menus to assign...">
+        </div>
         <div id="menuTray">
           {% for m in assignable_menus %}
           <div class="menu-chip" draggable="true" data-menu-id="{{ m.menu_id }}" data-menu-title="{{ m.title }}">
@@ -138,7 +153,7 @@
           <div class="board-empty">No menus assigned to you.</div>
           {% endfor %}
         </div>
-        <div class="hint">Drag a menu chip onto a user card to assign it.</div>
+        <div class="hint">Drag a menu onto a user, or click menu then user to assign quickly.</div>
       </div>
     </div>
   </aside>
@@ -229,13 +244,17 @@
 
       showToast(label, true);
 
+      var controller = new AbortController();
+      var timeout = setTimeout(function () { controller.abort(); }, 60000);
+
       fetch('{% url "assign_menu" %}', {
         method: 'POST',
         headers: {
           'X-Requested-With': 'XMLHttpRequest',
           'X-CSRFToken': getCSRF()
         },
-        body: body
+        body: body,
+        signal: controller.signal
       })
         .then(function (resp) { return resp.json(); })
         .then(function (data) {
@@ -246,7 +265,12 @@
             showToast(data.message || 'Unable to save change.', false);
           }
         })
-        .catch(function () { showToast('Request failed. Check your connection.', false); });
+        .catch(function (err) {
+          showToast(err && err.name === 'AbortError'
+            ? 'Request timed out. Please try again.'
+            : 'Request failed. Check your connection.', false);
+        })
+        .then(function () { clearTimeout(timeout); });
     }
 
     function assignMenu(userId, menuId, title) {
@@ -264,6 +288,7 @@
 
     /* ---- drag & drop: tray chips -> drop on user card ---- */
     var dragData = null;
+    var selectedMenu = null;
 
     document.querySelectorAll('.menu-chip').forEach(function (chip) {
       chip.addEventListener('dragstart', function (e) {
@@ -272,26 +297,51 @@
           menuId: chip.getAttribute('data-menu-id'),
           menuTitle: chip.getAttribute('data-menu-title')
         };
+        clearSelected();
         chip.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'copy';
         try { e.dataTransfer.setData('text/plain', chip.getAttribute('data-menu-title')); } catch (err) {}
       });
       chip.addEventListener('dragend', function () { chip.classList.remove('dragging'); });
+      chip.addEventListener('click', function (e) {
+        e.stopPropagation();
+        clearSelected();
+        selectedMenu = { menuId: chip.getAttribute('data-menu-id'), menuTitle: chip.getAttribute('data-menu-title') };
+        chip.classList.add('droppable-over');
+      });
     });
+    function clearSelected() {
+      selectedMenu = null;
+      document.querySelectorAll('#menuTray .menu-chip').forEach(function (c) { c.classList.remove('droppable-over'); });
+      document.querySelectorAll('.user-card').forEach(function (c) { c.classList.remove('droppable-over'); });
+    }
 
     document.querySelectorAll('.user-card').forEach(function (card) {
       card.addEventListener('dragover', function (e) {
         e.preventDefault();
         if (dragData && dragData.type === 'menu') card.classList.add('droppable-over');
+        else if (selectedMenu) card.classList.add('droppable-over');
       });
       card.addEventListener('dragleave', function () { card.classList.remove('droppable-over'); });
       card.addEventListener('drop', function (e) {
         e.preventDefault();
         card.classList.remove('droppable-over');
-        if (!dragData || dragData.type !== 'menu') return;
-        assignMenu(card.getAttribute('data-user-id'), dragData.menuId, dragData.menuTitle);
-        dragData = null;
+        if (dragData && dragData.type === 'menu') {
+          assignMenu(card.getAttribute('data-user-id'), dragData.menuId, dragData.menuTitle);
+          dragData = null;
+          return;
+        }
       });
+      card.addEventListener('click', function (e) {
+        if (e.target.closest('.bs-btn') || e.target.closest('.remove-x')) return;
+        if (selectedMenu) {
+          assignMenu(card.getAttribute('data-user-id'), selectedMenu.menuId, selectedMenu.menuTitle);
+          clearSelected();
+        }
+      });
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.menu-chip') && !e.target.closest('.user-card')) clearSelected();
     });
 
     /* ---- remove menu via cross button ---- */
@@ -319,6 +369,17 @@
         document.querySelectorAll('.user-card').forEach(function (card) {
           var hay = (card.getAttribute('data-fullname') + ' ' + card.getAttribute('data-user-id') + ' ' + card.getAttribute('data-email')).toLowerCase();
           card.style.display = hay.indexOf(q) === -1 ? 'none' : '';
+        });
+      });
+    }
+    var menuSearch = document.getElementById('menuSearch');
+    if (menuSearch) {
+      menuSearch.addEventListener('input', function () {
+        var q = menuSearch.value.trim().toLowerCase();
+        document.querySelectorAll('#menuTray .menu-chip').forEach(function (chip) {
+          var hay = chip.getAttribute('data-menu-title') + '';
+          hay = hay.toLowerCase();
+          chip.style.display = hay.indexOf(q) === -1 ? 'none' : '';
         });
       });
     }
