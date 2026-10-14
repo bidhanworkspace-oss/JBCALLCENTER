@@ -57,6 +57,14 @@ EJANATA_PORT = 'MTUyMQ=='
 EJANATA_SCHEMA = 'SkJQQVk='
 EJANATA_USER_SCHEMA = 'SkJDQUxMQ0VOVEVSLg=='
 
+###LIVE Connection###
+EJANATA_USER = 'Q0FMTENFTlRFUkFQUFNZUw=='
+EJANATA_PASSWORD = 'QWJjMTIzNCo='
+EJANATA_HOST = 'MTkyLjE2OC4xNzcuNDA='
+EJANATA_PORT = 'MTUyMQ=='
+EJANATA_SCHEMA = 'RUpNU1BEQg=='
+EJANATA_USER_SCHEMA = 'Q0FMTENFTlRFUkFQUFNZUw=='
+
 # Database connections are now created directly using API.dbConnectionEJanataStr()
 # (see login.api.API.dbConnectionEJanataStr). The Django DATABASES setting is no
 # longer required for Oracle access here.

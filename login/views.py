@@ -8,8 +8,9 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.contrib.auth.hashers import make_password, check_password
 
-from login.api import API, MAX_LOGIN_ATTEMPTS
+from login.api import API, MAX_LOGIN_ATTEMPTS, EJANATA_STATEMENT_NOT_FOUND_MESSAGE
 from login.decorators import permission_required_sp
+from login.menu_config import HIDDEN_SIDEBAR_MENUS
 from login.utils import get_session_user, save_upload, dispatch_email, insertuserlog
 from login.clssecurity import clsSecurity
 from django.conf import settings
@@ -39,12 +40,14 @@ def _load_user_menus(cursor, user_detail_id):
 
     permitted_menus = []
     for row in menu_cursor:
+        url_name = row[2]
         permitted_menus.append({
             'id': row[0],
             'title': row[1],
-            'url_name': row[2],
+            'url_name': url_name,
             'parent_id': row[3],
-            'icon': row[4]
+            'icon': row[4],
+            'hidden': url_name in HIDDEN_SIDEBAR_MENUS,
         })
     menu_cursor.close()
     return permitted_menus
@@ -845,6 +848,9 @@ def _ejanata_user_unlock_impl(request, mobileno=''):
     return render(request, 'login/ejanata_user_unlock.html', {
         'mobileno': mobileno,
         'appuserinfoid': appuserid,
+        'appusername': _ejanata_app_username(ejanatauser),
+        'accountno': _ejanata_account_no(ejanatauser),
+        'has_acc_statement': _has_menu(request, 'acc_statement'),
         'errormsg': errormsg,
         'searched': searched,
         'ejanatauser': ejanatauser,
@@ -1065,6 +1071,20 @@ def _ejanata_app_user_id(user):
     return str(user.get('Appuserinfoid') or '').strip()
 
 
+def _ejanata_app_username(user):
+    """The eJanata login name of the searched customer ('' when absent)."""
+    if not user:
+        return ''
+    return str(user.get('Appusername') or '').strip()
+
+
+def _ejanata_account_no(user):
+    """The CBS account number the statement is fetched for ('' when absent)."""
+    if not user:
+        return ''
+    return str(user.get('Cbsaccountno') or '').strip()
+
+
 def _ejanata_status_view(user, action):
     statusid = _ejanata_status_id(user)
     label, tone = _EJANATA_STATUS_LABELS.get(
@@ -1223,6 +1243,9 @@ def disable_ejanata_user(request, mobileno=''):
     return render(request, 'login/disable_ejanata_user.html', {
         'mobileno': mobileno,
         'appuserinfoid': appuserid,
+        'appusername': _ejanata_app_username(ejanatauser),
+        'accountno': _ejanata_account_no(ejanatauser),
+        'has_acc_statement': _has_menu(request, 'acc_statement'),
         'errormsg': errormsg,
         'searched': searched,
         'ejanatauser': ejanatauser,
@@ -1235,15 +1258,6 @@ def disable_ejanata_user(request, mobileno=''):
         'actor_role': request.session.get('JB_RoleName', ''),
     })
 
-
-
-ACCOUNT_RE = re.compile(r'^[A-Za-z0-9]{4,25}$')
-ACCOUNT_ERROR = ("Account number must be 4 to 25 letters or digits, with no "
-                 "spaces (e.g. 100123456789).")
-
-
-def _is_valid_account(accno):
-    return bool(ACCOUNT_RE.match(str(accno or '').strip()))
 
 
 _DEBIT_WORDS = ('DEBIT', 'DR', 'D', 'WITHDRAWAL', 'WITHDRAW', 'PAYMENT', 'DEBITED')
@@ -1303,50 +1317,71 @@ def _acc_statement_totals(rows):
     }
 
 
-@permission_required_sp('acc_statement')
-@superadmin_required
-def acc_statement(request, accno=''):
-    api = API()
+def _money(value):
+    """Format a computed total for the JSON payload (two decimals)."""
+    try:
+        return '%.2f' % float(value)
+    except (TypeError, ValueError):
+        return '0.00'
 
-    accno = (accno or request.POST.get('accno')
-             or request.GET.get('accno') or '').strip()
-    errormsg = ''
-    rows = []
-    totals = {'debit': 0.0, 'credit': 0.0, 'debit_count': 0, 'credit_count': 0}
-    is_sample = False
-    searched = False
 
-    if not accno:
-        if request.method == 'POST':
-            errormsg = "Please enter the account number to search."
-    elif not _is_valid_account(accno):
-        errormsg = ACCOUNT_ERROR
-    else:
-        searched = True
-        args, error = _ejanata_request_args(accno)
-        if error:
-            errormsg = error
-        else:
-            accnumber, ensoultioncode, confirmationtypeid = args
-            result = api.GetAccountStatement(
-                request, accnumber, ensoultioncode, confirmationtypeid,
-                request.GET.get('fromdate', ''), request.GET.get('todate', ''),
-            )
-            rows = _acc_statement_rows(result.get('transactions'))
-            totals = _acc_statement_totals(rows)
-            is_sample = bool(result.get('is_sample'))
+def acc_statement(request):
+    """Mini account statement for the user shown in the User Information panel.
 
-            if not result.get('success') and not rows:
-                errormsg = result.get('message') or "The account statement could not be retrieved."
+    Called by the Account Statement option under that panel's action bar on the
+    User Unlock and Disable eJanata User screens. The eJanata identifiers are the
+    ones the mobile-number search already returned for the customer and are
+    posted hidden from the page, so no account number is ever typed here.
 
-    return render(request, 'login/acc_statement.html', {
-        'accno': accno,
-        'errormsg': errormsg,
-        'searched': searched,
+    This is a JSON lookup, not a page: it exists only to feed the table shown on
+    that same page, and it is gated by the same Acc Statement menu permission
+    that makes the option visible in the first place.
+    """
+    if not get_session_user(request):
+        return JsonResponse(
+            {'success': False,
+             'message': 'Your session has expired. Please sign in again.'},
+            status=401,
+        )
+
+    if not _has_menu(request, 'acc_statement'):
+        return JsonResponse(
+            {'success': False,
+             'message': 'Access Denied: You do not have permission to view the '
+                        'account statement.'},
+            status=403,
+        )
+
+    if request.method != 'POST':
+        return JsonResponse(
+            {'success': False, 'message': 'Invalid request.'}, status=405,
+        )
+
+    appuserinfoid = (request.POST.get('appuserinfoid') or '').strip()
+    appusername = (request.POST.get('appusername') or '').strip()
+    accountno = (request.POST.get('accountno') or '').strip()
+
+    try:
+        result = API().GetAccountStatement(
+            request, appuserinfoid, appusername, accountno,
+        )
+    except Exception:
+        logger.exception("GetAccountStatement failed for accountno=%r", accountno)
+        return JsonResponse({
+            'success': False,
+            'message': EJANATA_STATEMENT_NOT_FOUND_MESSAGE,
+        })
+
+    rows = _acc_statement_rows(result.get('transactions'))
+    totals = _acc_statement_totals(rows)
+    totals['debit'] = _money(totals['debit'])
+    totals['credit'] = _money(totals['credit'])
+
+    return JsonResponse({
+        'success': bool(result.get('success')) or bool(rows),
+        'message': result.get('message') or '',
         'rows': rows,
         'totals': totals,
-        'is_sample': is_sample,
-        'actor_role': request.session.get('JB_RoleName', ''),
     })
 
 

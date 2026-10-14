@@ -1,9 +1,13 @@
+from datetime import datetime
+
 from django.shortcuts import render, redirect
 from django.contrib import messages
 
 from login.api import API
 from login.decorators import permission_required_sp
 from login.utils import get_session_user, save_upload
+
+TICKETS_PER_PAGE = 15
 
 
 TICKET_ISSUE_TYPES = [
@@ -35,6 +39,133 @@ def get_oracle_cursor():
     conn = API._get_connection()
     cursor = conn.cursor()
     return conn, cursor
+
+
+def parse_date(value):
+    """Parse a YYYY-MM-DD string into a date, returning None when invalid."""
+    try:
+        return datetime.strptime((value or '').strip(), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return None
+
+
+def map_ticket_row(row):
+    """Turn an SP_GET_TICKETS / SP_SEARCH_TICKETS row into a dict."""
+    status = row[7]
+    return {
+        'ticket_id': row[0],
+        'ticket_ref': row[1],
+        'issue_type': row[2],
+        'customer_name': row[3],
+        'mobile_no': row[4],
+        'account_no': row[5],
+        'priority': row[6],
+        'status': status,
+        'status_label': TICKET_STATUSES.get(status, status.title()),
+        'raised_by_user_id': row[8],
+        'created_at': row[9],
+        'response_count': row[10],
+        'open_days': row[11],
+    }
+
+
+def load_all_ticket_rows(filter_mode):
+    """Legacy loader: every ticket row via SP_GET_TICKETS.
+
+    Returns (rows, ok). ``ok`` is False only when the call itself failed.
+    """
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
+        tickets_cur = cursor.connection.cursor()
+        cursor.callproc('SP_GET_TICKETS', [filter_mode, tickets_cur])
+        rows = list(tickets_cur)
+        tickets_cur.close()
+        return rows, True
+    except Exception:
+        return [], False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def search_ticket_rows(filter_mode, ticket_no, mobile_no,
+                       date_from, date_to, offset, limit):
+    """DB-side filtered + paginated fetch via SP_SEARCH_TICKETS.
+
+    Returns (rows, total, ok). ``ok`` is False when the procedure is not
+    available (e.g. the migration was not applied yet) or the call failed, so
+    the caller can fall back to the legacy, in-Python behaviour.
+    """
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
+        tickets_cur = cursor.connection.cursor()
+        total_var = cursor.var(int)
+        cursor.callproc('SP_SEARCH_TICKETS', [
+            filter_mode,
+            ticket_no or None,
+            mobile_no or None,
+            date_from or None,
+            date_to or None,
+            offset,
+            limit,
+            tickets_cur,
+            total_var,
+        ])
+        rows = list(tickets_cur)
+        tickets_cur.close()
+        return rows, (total_var.getvalue() or 0), True
+    except Exception:
+        return [], 0, False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+class TicketPage:
+    """Minimal page object exposing the attributes tickets.html relies on."""
+
+    def __init__(self, rows, number, per_page, total):
+        self.rows = rows
+        self.number = number
+        self.per_page = per_page
+        self.count = total
+        self.num_pages = max(1, (total + per_page - 1) // per_page) if total else 1
+        self.paginator = self
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    @property
+    def has_previous(self):
+        return self.number > 1
+
+    @property
+    def has_next(self):
+        return self.number < self.num_pages
+
+    @property
+    def previous_page_number(self):
+        return self.number - 1
+
+    @property
+    def next_page_number(self):
+        return self.number + 1
+
+    @property
+    def start_index(self):
+        return 0 if not self.count else (self.number - 1) * self.per_page + 1
+
+    @property
+    def end_index(self):
+        return min(self.number * self.per_page, self.count)
 
 
 @permission_required_sp('raise_ticket')
@@ -134,44 +265,98 @@ def tickets_list(request):
     if filter_mode not in ('LATEST', 'PRIORITY'):
         filter_mode = 'LATEST'
 
-    tickets = []
-    conn = None
+    q_ticket = request.GET.get('ticket', '').strip()
+    q_mobile = request.GET.get('mobile', '').strip()
+    date_from_raw = request.GET.get('date_from', '').strip()
+    date_to_raw = request.GET.get('date_to', '').strip()
+    date_from = parse_date(date_from_raw)
+    date_to = parse_date(date_to_raw)
+    db_date_from = date_from_raw if date_from else None
+    db_date_to = date_to_raw if date_to else None
+
     try:
-        conn, cursor = get_oracle_cursor()
-        tickets_cur = cursor.connection.cursor()
+        page_number = int(request.GET.get('page', 1))
+    except (TypeError, ValueError):
+        page_number = 1
+    if page_number < 1:
+        page_number = 1
 
-        cursor.callproc('SP_GET_TICKETS', [filter_mode, tickets_cur])
+    per_page = TICKETS_PER_PAGE
+    offset = (page_number - 1) * per_page
 
-        for row in tickets_cur:
-            status = row[7]
-            tickets.append({
-                'ticket_id': row[0],
-                'ticket_ref': row[1],
-                'issue_type': row[2],
-                'customer_name': row[3],
-                'mobile_no': row[4],
-                'account_no': row[5],
-                'priority': row[6],
-                'status': status,
-                'status_label': TICKET_STATUSES.get(status, status.title()),
-                'raised_by_user_id': row[8],
-                'created_at': row[9],
-                'response_count': row[10],
-                'open_days': row[11],
-            })
-        tickets_cur.close()
-    except Exception:
-        messages.error(request, "Unable to load tickets right now.")
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    rows, total, used_db = search_ticket_rows(
+        filter_mode, q_ticket, q_mobile, db_date_from, db_date_to, offset, per_page
+    )
+
+    if used_db:
+        num_pages = max(1, (total + per_page - 1) // per_page) if total else 1
+        if total and page_number > num_pages:
+            page_number = num_pages
+            offset = (page_number - 1) * per_page
+            rows, total, used_db = search_ticket_rows(
+                filter_mode, q_ticket, q_mobile, db_date_from, db_date_to,
+                offset, per_page
+            )
+        if used_db:
+            page_obj = TicketPage(
+                [map_ticket_row(r) for r in rows], page_number, per_page, total
+            )
+
+    if not used_db:
+        all_rows, load_ok = load_all_ticket_rows(filter_mode)
+        if not load_ok:
+            messages.error(request, "Unable to load tickets right now.")
+        all_tickets = [map_ticket_row(r) for r in all_rows]
+
+        if q_ticket:
+            needle = q_ticket.lower()
+            all_tickets = [
+                t for t in all_tickets
+                if needle in str(t['ticket_ref'] or '').lower()
+            ]
+        if q_mobile:
+            needle = q_mobile.lower()
+            all_tickets = [
+                t for t in all_tickets
+                if needle in str(t['mobile_no'] or '').lower()
+            ]
+        if date_from:
+            all_tickets = [
+                t for t in all_tickets
+                if t['created_at'] and t['created_at'].date() >= date_from
+            ]
+        if date_to:
+            all_tickets = [
+                t for t in all_tickets
+                if t['created_at'] and t['created_at'].date() <= date_to
+            ]
+
+        total = len(all_tickets)
+        num_pages = max(1, (total + per_page - 1) // per_page) if total else 1
+        if page_number > num_pages:
+            page_number = num_pages
+        start = (page_number - 1) * per_page
+        page_obj = TicketPage(
+            all_tickets[start:start + per_page], page_number, per_page, total
+        )
+
+    params = request.GET.copy()
+    params.pop('page', None)
+    pagination_qs = params.urlencode()
+    filter_params = request.GET.copy()
+    filter_params.pop('page', None)
+    filter_params.pop('filter', None)
+    filter_qs = filter_params.urlencode()
 
     return render(request, 'ticket/tickets.html', {
-        'tickets': tickets,
+        'page_obj': page_obj,
         'filter_mode': filter_mode,
+        'q_ticket': q_ticket,
+        'q_mobile': q_mobile,
+        'date_from_raw': date_from_raw,
+        'date_to_raw': date_to_raw,
+        'pagination_qs': pagination_qs,
+        'filter_qs': filter_qs,
     })
 
 

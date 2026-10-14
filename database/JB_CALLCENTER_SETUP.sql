@@ -1227,6 +1227,117 @@ BEGIN
 END;
 /
 
+-- SP_SEARCH_TICKETS: DB-side filtered + paginated ticket query.
+-- Kept separate from SP_GET_TICKETS so existing callers are unaffected.
+CREATE OR REPLACE PROCEDURE SP_SEARCH_TICKETS (
+    p_filter     IN  VARCHAR2 DEFAULT 'LATEST',
+    p_ticket_no  IN  VARCHAR2 DEFAULT NULL,
+    p_mobile_no  IN  VARCHAR2 DEFAULT NULL,
+    p_date_from  IN  VARCHAR2 DEFAULT NULL,
+    p_date_to    IN  VARCHAR2 DEFAULT NULL,
+    p_offset     IN  NUMBER   DEFAULT 0,
+    p_limit      IN  NUMBER   DEFAULT NULL,
+    p_out_cursor OUT SYS_REFCURSOR,
+    o_total      OUT NUMBER
+) AS
+    v_priority VARCHAR2(20) := UPPER(NVL(p_filter, 'LATEST'));
+    v_offset   NUMBER := NVL(p_offset, 0);
+    v_from     DATE;
+    v_to       DATE;
+
+    FUNCTION parse_date (p IN VARCHAR2) RETURN DATE IS
+    BEGIN
+        IF p IS NULL OR TRIM(p) IS NULL THEN
+            RETURN NULL;
+        END IF;
+        RETURN TO_DATE(TRIM(p), 'YYYY-MM-DD');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN NULL;
+    END;
+BEGIN
+    v_from := parse_date(p_date_from);
+    v_to   := parse_date(p_date_to);
+
+    SELECT COUNT(*)
+      INTO o_total
+      FROM JB_TICKETS t
+     WHERE (p_ticket_no IS NULL OR UPPER(t.TICKET_REF_NO) LIKE '%' || UPPER(p_ticket_no) || '%')
+       AND (p_mobile_no IS NULL OR t.MOBILE_NO LIKE '%' || p_mobile_no || '%')
+       AND (v_from IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) >= v_from)
+       AND (v_to   IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) <= v_to);
+
+    IF v_priority = 'PRIORITY' THEN
+        OPEN p_out_cursor FOR
+            SELECT TICKET_ID, TICKET_REF_NO, ISSUE_TYPE_NAME, CUSTOMER_NAME,
+                   MOBILE_NO, ACCOUNT_NO, PRIORITY, STATUS, RAISED_BY_USERID,
+                   CREATED_AT, RESPONSE_COUNT, OPEN_DAYS
+              FROM (
+                    SELECT t.TICKET_ID,
+                           t.TICKET_REF_NO,
+                           t.ISSUE_TYPE_NAME,
+                           t.CUSTOMER_NAME,
+                           t.MOBILE_NO,
+                           t.ACCOUNT_NO,
+                           t.PRIORITY,
+                           t.STATUS,
+                           t.RAISED_BY_USERID,
+                           t.CREATED_AT,
+                           (SELECT COUNT(*) FROM JB_TICKET_RESPONSES r
+                             WHERE r.TICKET_ID = t.TICKET_ID) AS RESPONSE_COUNT,
+                           CASE WHEN t.STATUS IN ('SOLVED','DENIED') THEN NULL
+                                ELSE ROUND(SYSDATE - CAST(t.CREATED_AT AS DATE)) END AS OPEN_DAYS,
+                           ROW_NUMBER() OVER (
+                               ORDER BY CASE t.PRIORITY
+                                            WHEN 'VERY HIGH' THEN 1
+                                            WHEN 'HIGH'      THEN 2
+                                            ELSE 3
+                                        END,
+                                        t.CREATED_AT DESC
+                           ) AS RN
+                      FROM JB_TICKETS t
+                     WHERE (p_ticket_no IS NULL OR UPPER(t.TICKET_REF_NO) LIKE '%' || UPPER(p_ticket_no) || '%')
+                       AND (p_mobile_no IS NULL OR t.MOBILE_NO LIKE '%' || p_mobile_no || '%')
+                       AND (v_from IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) >= v_from)
+                       AND (v_to   IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) <= v_to)
+                   )
+             WHERE RN > v_offset
+               AND (p_limit IS NULL OR RN <= v_offset + p_limit)
+             ORDER BY RN;
+    ELSE
+        OPEN p_out_cursor FOR
+            SELECT TICKET_ID, TICKET_REF_NO, ISSUE_TYPE_NAME, CUSTOMER_NAME,
+                   MOBILE_NO, ACCOUNT_NO, PRIORITY, STATUS, RAISED_BY_USERID,
+                   CREATED_AT, RESPONSE_COUNT, OPEN_DAYS
+              FROM (
+                    SELECT t.TICKET_ID,
+                           t.TICKET_REF_NO,
+                           t.ISSUE_TYPE_NAME,
+                           t.CUSTOMER_NAME,
+                           t.MOBILE_NO,
+                           t.ACCOUNT_NO,
+                           t.PRIORITY,
+                           t.STATUS,
+                           t.RAISED_BY_USERID,
+                           t.CREATED_AT,
+                           (SELECT COUNT(*) FROM JB_TICKET_RESPONSES r
+                             WHERE r.TICKET_ID = t.TICKET_ID) AS RESPONSE_COUNT,
+                           CASE WHEN t.STATUS IN ('SOLVED','DENIED') THEN NULL
+                                ELSE ROUND(SYSDATE - CAST(t.CREATED_AT AS DATE)) END AS OPEN_DAYS,
+                           ROW_NUMBER() OVER (ORDER BY t.CREATED_AT DESC) AS RN
+                      FROM JB_TICKETS t
+                     WHERE (p_ticket_no IS NULL OR UPPER(t.TICKET_REF_NO) LIKE '%' || UPPER(p_ticket_no) || '%')
+                       AND (p_mobile_no IS NULL OR t.MOBILE_NO LIKE '%' || p_mobile_no || '%')
+                       AND (v_from IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) >= v_from)
+                       AND (v_to   IS NULL OR TRUNC(CAST(t.CREATED_AT AS DATE)) <= v_to)
+                   )
+             WHERE RN > v_offset
+               AND (p_limit IS NULL OR RN <= v_offset + p_limit)
+             ORDER BY RN;
+    END IF;
+END;
+/
+
 
 
 

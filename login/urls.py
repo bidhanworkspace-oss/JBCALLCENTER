@@ -21,7 +21,6 @@ urlpatterns = [
     path('disable-ejanata-user/<str:mobileno>/', views.disable_ejanata_user, name='disable_ejanata_user_by_mobile'),
 
     path('acc-statement/', views.acc_statement, name='acc_statement'),
-    path('acc-statement/<str:accno>/', views.acc_statement, name='acc_statement_by_accno'),
 
     path('disable-enable/', views.disable_enable, name='disable_enable'),
     path('disable-enable/<str:mobileno>/', views.disable_enable, name='disable_enable_by_mobile'),

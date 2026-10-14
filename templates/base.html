@@ -286,6 +286,29 @@
     .form-control:focus { border-color: var(--sky-500); background: #fff; box-shadow: 0 0 0 4px rgba(43,159,224,.14); }
     .form-note { font-size: .78rem; color: var(--muted); margin-bottom: 1rem; }
 
+    /* ============ Ticket filter bar ============ */
+    .ticket-filter-panel { padding: 1.1rem 1.25rem; }
+    .ticket-filter-panel .form-group { margin-bottom: 0; }
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        align-items: end;
+    }
+    .filter-actions { display: flex; gap: .5rem; align-items: center; }
+
+    /* ============ Pager ============ */
+    .pager {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap;
+        padding: .85rem 1.25rem; border-top: 1px solid var(--line);
+        background: #fbfdfe;
+    }
+    .pager-info { font-size: .8rem; color: var(--muted); font-weight: 600; }
+    .pager-controls { display: flex; align-items: center; gap: .5rem; }
+    .pager-current { font-size: .8rem; font-weight: 600; color: var(--sky-900); }
+    .btn.is-disabled { opacity: .5; pointer-events: none; }
+
     /* ============ Two-column helper ============ */
     .two-col { display: grid; grid-template-columns: minmax(0, 620px) 1fr; gap: 1.4rem; align-items: start; }
     @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
@@ -326,7 +349,7 @@
     <nav class="side-nav">
       <div class="nav-header">Navigation Menu</div>
       {% for menu in request.session.USER_MENUS %}
-        {% if not menu.parent_id %}
+        {% if not menu.parent_id and not menu.hidden %}
           <span class="nav-item">
             <a href="{% url menu.url_name %}">
               <span class="nav-dot"></span>

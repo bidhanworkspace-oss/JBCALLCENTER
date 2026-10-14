@@ -7,6 +7,7 @@ from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
 from login.api import API
+from login.menu_config import HIDDEN_SIDEBAR_MENUS
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +20,17 @@ def _fetch_user_menus(user_detail_id):
             menu_cursor = conn.cursor()
             cursor.callproc('SP_GET_USER_MENUS', [str(user_detail_id), menu_cursor])
 
-            menus = [{
-                'id': row[0],
-                'title': row[1],
-                'url_name': row[2],
-                'parent_id': row[3],
-                'icon': row[4],
-            } for row in menu_cursor]
+            menus = []
+            for row in menu_cursor:
+                url_name = row[2]
+                menus.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'url_name': url_name,
+                    'parent_id': row[3],
+                    'icon': row[4],
+                    'hidden': url_name in HIDDEN_SIDEBAR_MENUS,
+                })
             menu_cursor.close()
             cursor.close()
         finally:

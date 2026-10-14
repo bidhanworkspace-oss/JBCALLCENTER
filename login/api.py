@@ -23,23 +23,12 @@ def _ejanata_timeout():
     except (TypeError, ValueError):
         return 30
 
-_SAMPLE_TRANSACTIONS = (
-    {'txndate': '2026-01-05 09:14:22', 'amount': '2500.00', 'type': 'Debit',
-     'description': 'SAMPLE ROW - not a real transaction'},
-    {'txndate': '2026-01-07 11:02:05', 'amount': '150000.00', 'type': 'Credit',
-     'description': 'SAMPLE ROW - not a real transaction'},
-    {'txndate': '2026-01-11 16:47:39', 'amount': '875.50', 'type': 'Debit/Credit',
-     'description': 'SAMPLE ROW - ambiguous type, renders unclassified'},
-    {'txndate': '2026-01-15 08:30:00', 'amount': '40000.00', 'type': 'Credit',
-     'description': 'SAMPLE ROW - not a real transaction'},
-)
-
-
-
 EJANATA_UNAVAILABLE_MESSAGE = (
     'The eJanata service is not responding right now. Please try again in a '
     'few minutes.'
 )
+
+EJANATA_STATEMENT_NOT_FOUND_MESSAGE = 'Account Statement Not Found'
 
 _BODY_PREVIEW = 300
 
@@ -513,50 +502,68 @@ class API:
         )
 
     # ------------------------------------------------------------------
-    # Account statement (menu: Acc Statement).
+    # Account statement (menu permission: Acc Statement).
+    #
+    # This backs the mini statement shown *inside* the User Information panel of
+    # the User Unlock and Disable eJanata User screens, so the three identifiers
+    # it needs are the ones the mobile-number search already returned for that
+    # customer (Appuserinfoid / Appusername / Cbsaccountno). They travel hidden
+    # from the page, which is why no account number is ever typed here.
     #
     # Returns a plain dict rather than an ApiResponse because the screen needs
     # the transaction rows, not just a verdict:
-    #     {'success': bool, 'message': str, 'transactions': [...],
-    #      'is_sample': bool}
+    #     {'success': bool, 'message': str, 'transactions': [...]}
     # Never raises, so the view cannot go down on an API problem.
     # ------------------------------------------------------------------
     def GetAccountStatement(self, request, appuserinfoid, appusername, accountno):
-        endpoint = str(
-            getattr(settings, 'EJANATA_ACC_STATEMENT_ENDPOINT', '') or ''
-        ).strip()
-        if not endpoint:
+        appuserinfoid = str(appuserinfoid or '').strip()
+        appusername = str(appusername or '').strip()
+        accountno = str(accountno or '').strip()
+
+        if not accountno:
+            return {
+                'success': False,
+                'message': EJANATA_STATEMENT_NOT_FOUND_MESSAGE,
+                'transactions': [],
+            }
+
+        try:
+            solutioncode = clsSecurity.decodestr(
+                settings.EJANATASOLUTIONCODE).strip()
+        except Exception:
+            logger.exception(
+                "Could not read EJANATASOLUTIONCODE; the account statement was "
+                "not attempted."
+            )
+            solutioncode = ''
+
+        if not solutioncode:
             logger.error(
-                "Showing sample statement rows: EJANATA_ACC_STATEMENT_ENDPOINT "
-                "is not configured."
+                "EJANATASOLUTIONCODE is empty on this server; the account "
+                "statement was not attempted."
             )
             return {
-                'success': True,
-                'message': ('These rows are samples, not a real statement: the '
-                            'statement service is not available yet.'),
-                'transactions': _SAMPLE_TRANSACTIONS,
-                'is_sample': True,
+                'success': False,
+                'message': EJANATA_UNAVAILABLE_MESSAGE,
+                'transactions': [],
             }
 
         body = {
             "solutioncode": solutioncode,
-            "accno": accno,
-            "confirmationtypeid": confirmationtypeid,
+            "appuserinfoid": appuserinfoid,
+            "appusername": appusername,
+            "accountno": accountno,
         }
-        if fromdate:
-            body['fromdate'] = fromdate
-        if todate:
-            body['todate'] = todate
 
-        apiResponse = API._ejanata_post(request, API.urlaccstatement, body,
-                                        'account statement')
+        apiResponse = API._ejanata_post(
+            request, API.urlaccstatement, body, 'account statement',
+        )
         succeeded = str(apiResponse.ResponseCode) in ('200', '210')
         return {
             'success': succeeded,
-            'message': apiResponse.Message or '',
+            'message': '' if succeeded else EJANATA_STATEMENT_NOT_FOUND_MESSAGE,
             'transactions': (API._normalize_statement_rows(apiResponse.raw)
                              if succeeded else []),
-            'is_sample': False,
         }
 
     @staticmethod
@@ -594,8 +601,9 @@ class API:
                 'amount': _field(row, 'amount', 'txnamount', 'transactionamount'),
                 'type': _field(row, 'type', 'transactiontype', 'txntype',
                                'debitcredit', 'drcr'),
-                'description': _field(row, 'description', 'narration', 'particulars',
-                                      'details', 'remarks'),
+                'description': _field(row, 'description', 'transactiondesc',
+                                      'narration', 'transactionnarrative',
+                                      'particulars', 'details', 'remarks'),
             })
         return normalized
 
@@ -928,7 +936,7 @@ class API:
 
         for attribute, fieldname in API._EJANATA_FIELD_ALIASES.items():
             aliasvalue = _value(fieldname)
-            if aliasvalue:
+            if aliasvalue and not getattr(user, attribute, None):
                 setattr(user, attribute, aliasvalue)
 
         if not getattr(user, 'Name', None):
@@ -951,6 +959,11 @@ class API:
     _EJANATA_FIELD_ALIASES = {
         'Dob': 'dateofbirth',
         'Branchcode': 'verifiedbranchcode',
+        # The mobile-number search returns the CBS account number as
+        # ``accountno``, while the DTO column is ``Cbsaccountno``. Without this
+        # mapping the value was dropped, so the account statement was fetched
+        # with an empty account number.
+        'Cbsaccountno': 'accountno',
     }
 
     @staticmethod

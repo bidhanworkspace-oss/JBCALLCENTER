@@ -149,6 +149,48 @@
         <span class="status-pill {% if statusview.tone == 'good' %}pill-good{% else %}pill-danger{% endif %}">{{ statusview.label }}</span>
       </div>
     </div>
+    {% if action_message %}
+    <div class="note-box warn status-note">{{ action_message }}</div>
+    {% endif %}
+    {% if has_acc_statement and ejanatauser %}
+    <div class="status-head">
+      <div class="panel-title" style="font-size:.95rem;">Account Statement</div>
+      <div class="panel-sub">Mini statement for the account registered against this user.</div>
+    </div>
+    <form id="stmtForm" action="{% url 'acc_statement' %}" method="post" style="display:none;">
+      {% csrf_token %}
+      <input type="hidden" name="appuserinfoid" value="{{ appuserinfoid }}">
+      <input type="hidden" name="appusername" value="{{ appusername|default:'' }}">
+      <input type="hidden" name="accountno" value="{{ accountno|default:'' }}">
+    </form>
+    <button type="button" id="showStmtBtn" class="btn btn-ghost">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M9 16h6"/><rect x="5" y="4" width="14" height="16" rx="2"/></svg>
+      Show Mini Statement
+    </button>
+    <div id="stmtPanel" style="display:none; margin-top:1rem;">
+      <div class="note-box warn" id="stmtErr" style="display:none;"></div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:20%;">Txn Date</th>
+              <th style="width:18%;">Amount</th>
+              <th style="width:16%;">Type</th>
+              <th style="width:46%;">Description</th>
+            </tr>
+          </thead>
+          <tbody id="stmtBody"></tbody>
+        </table>
+      </div>
+      <div style="padding: .8rem 1rem 1rem;">
+        <div class="stmt-summary">
+          <span class="stmt-chip debit">Debit total <span class="val" id="sumDebit">0.00</span></span>
+          <span class="stmt-chip credit">Credit total <span class="val" id="sumCredit">0.00</span></span>
+          <span class="stmt-chip">Transactions <span class="val" id="sumCount">0</span></span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% else %}
     <div class="note-box warn">
       No user found with mobile number <strong>{{ mobileno }}</strong> in the eJanata application.
@@ -156,9 +198,8 @@
     {% endif %}
   </div>
 
-  {% if ejanatauser %}
+  {% if ejanatauser and unlock_allowed %}
   <div class="unlock-foot">
-    {% if unlock_allowed %}
     <form method="post" action="{% url 'ejanata_user_unlock' %}" class="unlock-form">
       {% csrf_token %}
       <input type="hidden" name="mobileno" value="{{ mobileno }}">
@@ -174,9 +215,6 @@
         ({{ ejanatauser.Mobileno|default:mobileno }}) in the eJanata application.
       </span>
     </form>
-    {% else %}
-    <div class="note-box warn action-note">{{ action_message }}</div>
-    {% endif %}
   </div>
   {% endif %}
 </div>
@@ -275,6 +313,59 @@
         lock('Unlocking ' + user + '\u2026');
       });
     });
+
+    /* Account statement */
+    var stmtBtn = document.getElementById('showStmtBtn');
+    var stmtPanel = document.getElementById('stmtPanel');
+    var stmtErr = document.getElementById('stmtErr');
+    var stmtBody = document.getElementById('stmtBody');
+    var sumDebit = document.getElementById('sumDebit');
+    var sumCredit = document.getElementById('sumCredit');
+    var sumCount = document.getElementById('sumCount');
+    var stmtForm = document.getElementById('stmtForm');
+
+    function setStmtError(message) {
+      stmtErr.textContent = message;
+      stmtErr.style.display = 'block';
+    }
+    function clearStmtError() {
+      stmtErr.textContent = '';
+      stmtErr.style.display = 'none';
+    }
+    function addStmtRow(row) {
+      var tr = document.createElement('tr');
+      var tdDate = document.createElement('td'); tdDate.className = 'num'; tdDate.textContent = row.txndate || '-'; tr.appendChild(tdDate);
+      var tdAmt = document.createElement('td'); tdAmt.className = 'num strong'; tdAmt.textContent = row.amount || '-'; tr.appendChild(tdAmt);
+      var tdType = document.createElement('td');
+      var span = document.createElement('span');
+      var kind = ''; if (row.is_debit) kind='debit'; if (row.is_credit) kind='credit'; if (!kind && row.type) kind='unknown';
+      span.className = 'txn-type ' + (kind || 'unknown');
+      var dot = document.createElement('span'); dot.className = 'dot'; span.appendChild(dot); span.appendChild(document.createTextNode(row.type || '-'));
+      tdType.appendChild(span); tr.appendChild(tdType);
+      var tdDesc = document.createElement('td'); tdDesc.textContent = row.description || '-'; tr.appendChild(tdDesc);
+      stmtBody.appendChild(tr);
+    }
+    if (stmtBtn && stmtForm) {
+      stmtBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (stmtBtn.disabled) return;
+        stmtBtn.disabled = true; stmtBtn.textContent = 'Loading...';
+        clearStmtError(); stmtBody.innerHTML = '';
+        sumDebit.textContent = '0.00'; sumCredit.textContent = '0.00'; sumCount.textContent = '0';
+        stmtPanel.style.display = 'block';
+        var formData = new FormData(stmtForm);
+        fetch('{% url 'acc_statement' %}', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: formData })
+          .then(function (resp) { return resp.json(); })
+          .then(function (data) {
+            if (!data.success && (!data.rows || data.rows.length === 0)) { setStmtError(data.message || 'Account Statement Not Found'); return; }
+            var rows = data.rows || []; for (var i=0;i<rows.length;i++) addStmtRow(rows[i]);
+            var totals = data.totals || {}; sumDebit.textContent = totals.debit || '0.00'; sumCredit.textContent = totals.credit || '0.00'; sumCount.textContent = String(rows.length);
+            if (data.message && !rows.length) setStmtError(data.message);
+          })
+          .catch(function () { setStmtError('Account Statement Not Found'); })
+          .then(function () { stmtBtn.disabled = false; stmtBtn.textContent = 'Show Mini Statement'; });
+      });
+    }
 
     /* Back/forward cache restore after a failed post. */
     window.addEventListener('pageshow', function (event) {

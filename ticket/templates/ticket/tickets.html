@@ -6,6 +6,35 @@
 {% block page_sub %}Track every support ticket from raising to resolution.{% endblock %}
 
 {% block content %}
+<div class="panel ticket-filter-panel">
+  <form class="filter-grid" method="GET" action="{% url 'tickets' %}">
+    <input type="hidden" name="filter" value="{{ filter_mode|lower }}">
+    <div class="form-group">
+      <label for="flt_ticket">Ticket Number</label>
+      <input class="form-control" type="text" id="flt_ticket" name="ticket" value="{{ q_ticket }}" placeholder="e.g. TKT-20260101-0001">
+    </div>
+    <div class="form-group">
+      <label for="flt_mobile">Mobile Number</label>
+      <input class="form-control" type="text" id="flt_mobile" name="mobile" value="{{ q_mobile }}" placeholder="e.g. 01712345678">
+    </div>
+    <div class="form-group">
+      <label for="flt_from">Date From</label>
+      <input class="form-control" type="date" id="flt_from" name="date_from" value="{{ date_from_raw }}">
+    </div>
+    <div class="form-group">
+      <label for="flt_to">Date To</label>
+      <input class="form-control" type="date" id="flt_to" name="date_to" value="{{ date_to_raw }}">
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        Search
+      </button>
+      <a class="btn btn-ghost" href="{% url 'tickets' %}?filter={{ filter_mode|lower }}">Reset</a>
+    </div>
+  </form>
+</div>
+
 <div class="panel">
   <div class="panel-head" style="flex-wrap:wrap;">
     <div>
@@ -24,8 +53,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
         Raise New Ticket
       </a>
-      <a class="btn {% if filter_mode == 'LATEST' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=latest">Latest Tickets</a>
-      <a class="btn {% if filter_mode == 'PRIORITY' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=priority">High Priority First</a>
+      <a class="btn {% if filter_mode == 'LATEST' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=latest{% if filter_qs %}&{{ filter_qs }}{% endif %}">Latest Tickets</a>
+      <a class="btn {% if filter_mode == 'PRIORITY' %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'tickets' %}?filter=priority{% if filter_qs %}&{{ filter_qs }}{% endif %}">High Priority First</a>
     </div>
   </div>
 
@@ -47,7 +76,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for t in tickets %}
+          {% for t in page_obj %}
           <tr>
             <td class="strong code">{{ t.ticket_ref }}</td>
             <td>{{ t.issue_type }}</td>
@@ -70,11 +99,32 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="10" class="empty">No tickets found. Click "Raise New Ticket" to create one.</td></tr>
+          <tr><td colspan="10" class="empty">No tickets found. Click "Raise New Ticket" to create one or adjust your filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
+    {% if page_obj.paginator.count %}
+    <div class="pager">
+      <div class="pager-info">
+        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} ticket{{ page_obj.paginator.count|pluralize }}
+      </div>
+      <div class="pager-controls">
+        {% if page_obj.has_previous %}
+          <a class="btn btn-ghost btn-sm" href="?page={{ page_obj.previous_page_number }}{% if pagination_qs %}&{{ pagination_qs }}{% endif %}">Prev</a>
+        {% else %}
+          <span class="btn btn-ghost btn-sm is-disabled">Prev</span>
+        {% endif %}
+        <span class="pager-current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a class="btn btn-ghost btn-sm" href="?page={{ page_obj.next_page_number }}{% if pagination_qs %}&{{ pagination_qs }}{% endif %}">Next</a>
+        {% else %}
+          <span class="btn btn-ghost btn-sm is-disabled">Next</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
