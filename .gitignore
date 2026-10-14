@@ -20,3 +20,8 @@ staticfiles/
 
 # Environment / secrets
 .env
+
+# Large archives / backups
+*.tar
+*.tar.gz
+*.zip
