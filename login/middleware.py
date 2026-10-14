@@ -6,8 +6,7 @@ from django.contrib import messages
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
-from login.api import API
-from login.menu_config import HIDDEN_SIDEBAR_MENUS
+from login.api import API, HIDDEN_SIDEBAR_MENUS
 
 logger = logging.getLogger(__name__)
 

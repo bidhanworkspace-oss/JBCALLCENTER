@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 VALID_STATUSES = ('Enabled', 'Disabled', 'Locked')
 MAX_LOGIN_ATTEMPTS = 3
 
+HIDDEN_SIDEBAR_MENUS = frozenset({'acc_statement'})
+
 
 def _ejanata_timeout():
 

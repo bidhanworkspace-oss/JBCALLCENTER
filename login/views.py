@@ -8,9 +8,8 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.contrib.auth.hashers import make_password, check_password
 
-from login.api import API, MAX_LOGIN_ATTEMPTS, EJANATA_STATEMENT_NOT_FOUND_MESSAGE
+from login.api import API, MAX_LOGIN_ATTEMPTS, EJANATA_STATEMENT_NOT_FOUND_MESSAGE, HIDDEN_SIDEBAR_MENUS
 from login.decorators import permission_required_sp
-from login.menu_config import HIDDEN_SIDEBAR_MENUS
 from login.utils import get_session_user, save_upload, dispatch_email, insertuserlog
 from login.clssecurity import clsSecurity
 from django.conf import settings
