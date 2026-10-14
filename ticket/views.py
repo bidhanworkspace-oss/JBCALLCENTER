@@ -365,7 +365,7 @@ def ticket_detail(request, ticket_id):
     user_detail_id = get_session_user(request)
     user_login_id = request.session.get('JB_UserID')
     actor_role = request.session.get('JB_RoleName', '')
-    can_take_action = actor_role == 'Bank Support'
+    can_take_action = (actor_role or '').strip().lower() == 'bank support'
 
     if request.method == 'POST' and not can_take_action:
         messages.error(request, "You do not have permission to respond to tickets.")

@@ -7,6 +7,10 @@ urlpatterns = [
     path('register/', views.register_user, name='register'),
     path('forgot-password/', views.forget_password, name='forgot_password'),
     path('force-change-password/', views.force_change_password, name='force_change_password'),
+    path('admin/dashboard/', views.admin_dashboard, name='admin_dashboard'),
+    path('admin/bank-support/<str:user_id>/<str:action>/', views.set_bank_support, name='set_bank_support'),
+    path('dashboard/status/<str:user_id>/<str:status>/', views.set_account_status, name='set_account_status'),
+
     path('manager/dashboard/', views.manager_dashboard, name='manager_dashboard'),
     path('manager/approve/<int:reg_id>/', views.approve_user, name='approve_user'),
     path('manager/unlock/<str:user_id>/', views.unlock_user, name='unlock_user'),

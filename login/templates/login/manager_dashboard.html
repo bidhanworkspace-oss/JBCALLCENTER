@@ -104,7 +104,10 @@
               <td class="strong">{{ u.user_id }}</td>
               <td>{{ u.fullname }}</td>
               <td><span class="badge badge-danger">{{ u.failed_attempts }}</span></td>
-              <td>
+              <td style="display:flex; gap:.35rem; flex-wrap:wrap;">
+                <a class="btn btn-success btn-sm" href="{% url 'set_account_status' u.user_id 'Enabled' %}?next=manager_dashboard" onclick="return confirm('Enable this user?');">
+                  Enable
+                </a>
                 <a class="btn btn-warning btn-sm" href="{% url 'unlock_user' u.user_id %}?next=manager_dashboard" onclick="return confirm('Unlock this account and reset password?');">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>
                   Unlock
@@ -142,6 +145,7 @@
             <th>Role</th>
             <th>Status</th>
             <th>Created</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -160,12 +164,15 @@
             <td class="muted">{{ u.email }}</td>
             <td><span class="badge badge-info">{{ u.role_name|default:"—" }}</span></td>
             <td>
-              <span class="badge {% if u.status == 'ACTIVE' %}badge-good{% elif u.status == 'LOCKED' %}badge-warn{% else %}badge-danger{% endif %}">{{ u.status }}</span>
+              <span class="badge {% if u.status == 'Enabled' %}badge-good{% elif u.status == 'Locked' %}badge-warn{% else %}badge-danger{% endif %}">{{ u.status }}</span>
             </td>
             <td class="muted">{{ u.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              <a class="btn btn-danger btn-sm" href="{% url 'set_account_status' u.user_id 'Disabled' %}?next=manager_dashboard" onclick="return confirm('Disable this user?');">Disable</a>
+            </td>
           </tr>
           {% empty %}
-          <tr><td colspan="8" class="empty">No active users found.</td></tr>
+          <tr><td colspan="9" class="empty">No active users found.</td></tr>
           {% endfor %}
         </tbody>
       </table>

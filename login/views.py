@@ -90,8 +90,14 @@ def _reset_failed_login(user_detail_id):
 
 
 def dashboard(request):
+    """Landing page - identical for every role (Superadmin, Manager, User).
+
+    Each role reaches its own management screens (Admin Dashboard / Manager
+    Dashboard) from the sidebar menu instead of being redirected here.
+    """
     if not get_session_user(request):
         return redirect('login_page')
+
     return render(request, 'login/dashboard.html')
 
 
@@ -611,7 +617,10 @@ def approve_user(request, reg_id):
             except Exception:
                 pass
 
-    return redirect('manager_dashboard')
+    next_page = 'manager_dashboard'
+    if (request.session.get('JB_RoleName') or '').strip().upper() == 'SUPERADMIN':
+        next_page = 'admin_dashboard'
+    return redirect(next_page)
 
 
 @permission_required_sp('unlock_user')
@@ -1712,3 +1721,160 @@ def create_manager(request):
         return redirect('create_manager')
 
     return render(request, 'login/create_manager.html')
+
+
+# ==================================================================
+# ADMIN DASHBOARD (Super Admin only)
+#   - Pending registrations to approve
+#   - Managers and regular Users (incl. Bank Support) with enable/disable
+#   - Make / remove Bank Support role
+# ==================================================================
+@permission_required_sp('dashboard')
+@superadmin_required
+def admin_dashboard(request):
+    pending_users = []
+    managers = []
+    users = []
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
+
+        pending_cur = cursor.connection.cursor()
+        cursor.callproc('SP_GET_PENDING_REGISTRATIONS', [pending_cur])
+        for row in pending_cur:
+            pending_users.append({
+                'registration_id': row[0],
+                'fullname': row[1],
+                'mobile': row[2],
+                'email': row[3],
+                'nid': row[4],
+                'attachment_path': row[5],
+                'office_id': row[6] if len(row) > 6 else None,
+            })
+        pending_cur.close()
+
+        mgr_cur = cursor.connection.cursor()
+        cursor.callproc('SP_GET_MANAGERS', [mgr_cur])
+        for row in mgr_cur:
+            managers.append({
+                'user_detail_id': row[0],
+                'user_id': row[1],
+                'fullname': row[2],
+                'mobile': row[3],
+                'email': row[4],
+                'status': row[5],
+                'failed_attempts': row[6],
+                'image_path': row[7],
+                'created_at': row[8],
+            })
+        mgr_cur.close()
+
+        user_cur = cursor.connection.cursor()
+        cursor.callproc('SP_GET_USERS_FOR_ADMIN', [user_cur])
+        for row in user_cur:
+            users.append({
+                'user_detail_id': row[0],
+                'user_id': row[1],
+                'fullname': row[2],
+                'mobile': row[3],
+                'email': row[4],
+                'role_name': row[5],
+                'image_path': row[6],
+                'status': row[7],
+                'created_at': row[8],
+            })
+        user_cur.close()
+    except Exception:
+        logger.exception("Failed to load admin dashboard data")
+        messages.error(request, "Unable to load dashboard data.")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return render(request, 'login/admin_dashboard.html', {
+        'pending_users': pending_users,
+        'managers': managers,
+        'users': users,
+    })
+
+
+# ==================================================================
+# Make / remove Bank Support role (Super Admin only)
+#   Reuses SP_ASSIGN_BANK_SUPPORT_ROLE which also grants/revokes the
+#   ticket menus so a Bank Support user can actually open and answer.
+# ==================================================================
+@permission_required_sp('dashboard')
+@superadmin_required
+def set_bank_support(request, user_id, action):
+    actor_id = get_session_user(request)
+    if not actor_id:
+        return redirect('login_page')
+
+    enable = 1 if (action or '').strip().lower() in ('set_support', 'make', 'enable') else 0
+
+    conn = None
+    try:
+        conn, cursor = get_oracle_cursor()
+        success = cursor.var(int)
+        msg = cursor.var(str)
+        cursor.callproc('SP_ASSIGN_BANK_SUPPORT_ROLE', [
+            actor_id, user_id, enable, success, msg
+        ])
+        ok = success.getvalue() == 1
+        text = msg.getvalue()
+        if ok:
+            conn.commit()
+            messages.success(request, text)
+        else:
+            messages.error(request, text)
+    except Exception:
+        logger.exception("set_bank_support failed for %r", user_id)
+        messages.error(request, "Unable to change the Bank Support role right now.")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return redirect('admin_dashboard')
+
+
+# ==================================================================
+# Shared enable/disable action used by BOTH dashboards.
+# The Oracle procedure SP_SET_USER_STATUS enforces the policy:
+#   - Superadmin -> any account (Manager or User)
+#   - Manager    -> ONLY a regular 'User'
+# ==================================================================
+@permission_required_sp('dashboard')
+def set_account_status(request, user_id, status):
+    actor_id = get_session_user(request)
+    if not actor_id:
+        return redirect('login_page')
+
+    new_status = (status or '').strip().title()
+    if new_status not in ('Enabled', 'Disabled'):
+        messages.error(request, "Invalid status request.")
+        return redirect('dashboard')
+
+    try:
+        target_detail_id = API()._detail_id_of_userid(user_id)
+        if not target_detail_id:
+            messages.error(request, "User not found.")
+        else:
+            API().SetUserStatus(actor_id, target_detail_id, new_status,
+                                "Status changed from dashboard")
+            messages.success(request, "%s is now %s." % (user_id, new_status))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    except Exception:
+        logger.exception("set_account_status failed for %r", user_id)
+        messages.error(request, "Unable to update the account status right now.")
+
+    next_page = request.GET.get('next')
+    if next_page not in ('admin_dashboard', 'manager_dashboard'):
+        next_page = 'dashboard'
+    return redirect(next_page)

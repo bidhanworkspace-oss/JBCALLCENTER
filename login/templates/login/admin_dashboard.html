@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard | JB Call Center{% endblock %}
+{% block page_heading %}Admin Dashboard{% endblock %}
+{% block page_title %}Super Admin Control Panel{% endblock %}
+{% block page_sub %}Approve pending registrations and manage Manager, User and Bank Support accounts.{% endblock %}
+
+{% block content %}
+<div class="tiles">
+  <div class="tile warn">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ pending_users|length }}</div>
+      <div class="tile-label">Pending Registrations</div>
+      <a class="tile-link" href="{% url 'pending_registration' %}">Review queue &rarr;</a>
+    </div>
+  </div>
+  <div class="tile info">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ managers|length }}</div>
+      <div class="tile-label">Total Managers</div>
+    </div>
+  </div>
+  <div class="tile ok">
+    <span class="tile-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+    </span>
+    <div class="tile-body">
+      <div class="tile-value">{{ users|length }}</div>
+      <div class="tile-label">Total Users</div>
+    </div>
+  </div>
+</div>
+
+<!-- Pending registrations -->
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Pending Registrations</div>
+      <div class="panel-sub">New users awaiting approval</div>
+    </div>
+    <span class="badge badge-warn">{{ pending_users|length }} pending</span>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>NID</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in pending_users %}
+          <tr>
+            <td class="strong">{{ u.fullname }}</td>
+            <td class="num">{{ u.mobile }}</td>
+            <td class="muted">{{ u.email }}</td>
+            <td class="num muted">{{ u.nid }}</td>
+            <td>
+              <a class="btn btn-success btn-sm" href="{% url 'approve_user' u.registration_id %}" onclick="return confirm('Approve this user?');">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+                Approve
+              </a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="empty">No pending registrations found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Managers -->
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">Manager Accounts</div>
+      <div class="panel-sub">Enable or disable a Manager account</div>
+    </div>
+    <a class="btn btn-primary" href="{% url 'create_manager' %}">Create Manager</a>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap" style="max-height:520px; overflow-y:auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Photo</th>
+            <th>User ID</th>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in managers %}
+          <tr>
+            <td>
+              {% if u.image_path %}
+                <img src="{{ u.image_path }}" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+              {% else %}
+                <span class="topbar-avatar" style="width:34px;height:34px;">{{ u.fullname|slice:":1"|upper }}</span>
+              {% endif %}
+            </td>
+            <td class="strong code">{{ u.user_id }}</td>
+            <td>{{ u.fullname }}</td>
+            <td class="num">{{ u.mobile }}</td>
+            <td class="muted">{{ u.email }}</td>
+            <td>
+              <span class="badge {% if u.status == 'Enabled' %}badge-good{% else %}badge-danger{% endif %}">{{ u.status }}</span>
+            </td>
+            <td class="muted">{{ u.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              {% if u.status == 'Enabled' %}
+                <a class="btn btn-danger btn-sm"
+                   href="{% url 'set_account_status' u.user_id 'Disabled' %}?next=admin_dashboard"
+                   onclick="return confirm('Disable this manager?');">Disable</a>
+              {% else %}
+                <a class="btn btn-success btn-sm"
+                   href="{% url 'set_account_status' u.user_id 'Enabled' %}?next=admin_dashboard"
+                   onclick="return confirm('Enable this manager?');">Enable</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="empty">No Manager accounts found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Users -->
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <div class="panel-title">User Accounts</div>
+      <div class="panel-sub">Enable/disable a user or make them Bank Support</div>
+    </div>
+    <span class="badge badge-good">{{ users|length }} users</span>
+  </div>
+  <div class="panel-body flush">
+    <div class="table-wrap" style="max-height:560px; overflow-y:auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Photo</th>
+            <th>User ID</th>
+            <th>Full Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Bank Support</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>
+              {% if u.image_path %}
+                <img src="{{ u.image_path }}" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+              {% else %}
+                <span class="topbar-avatar" style="width:34px;height:34px;">{{ u.fullname|slice:":1"|upper }}</span>
+              {% endif %}
+            </td>
+            <td class="strong code">{{ u.user_id }}</td>
+            <td>{{ u.fullname }}</td>
+            <td class="num">{{ u.mobile }}</td>
+            <td class="muted">{{ u.email }}</td>
+            <td>
+              {% if u.role_name|lower == 'bank support' %}
+                <span class="badge badge-warn">Bank Support</span>
+              {% else %}
+                <span class="badge badge-info">{{ u.role_name|default:"User" }}</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {% if u.status == 'Enabled' %}badge-good{% else %}badge-danger{% endif %}">{{ u.status }}</span>
+            </td>
+            <td>
+              {% if u.role_name|lower == 'bank support' %}
+                <a class="btn btn-warning btn-sm"
+                   href="{% url 'set_bank_support' u.user_id 'unset_support' %}"
+                   onclick="return confirm('Remove the Bank Support role from this user?');">Remove Bank Support</a>
+              {% else %}
+                <a class="btn btn-primary btn-sm"
+                   href="{% url 'set_bank_support' u.user_id 'set_support' %}"
+                   onclick="return confirm('Make this user Bank Support?');">Make Bank Support</a>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.status == 'Enabled' %}
+                <a class="btn btn-danger btn-sm"
+                   href="{% url 'set_account_status' u.user_id 'Disabled' %}?next=admin_dashboard"
+                   onclick="return confirm('Disable this user?');">Disable</a>
+              {% else %}
+                <a class="btn btn-success btn-sm"
+                   href="{% url 'set_account_status' u.user_id 'Enabled' %}?next=admin_dashboard"
+                   onclick="return confirm('Enable this user?');">Enable</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9" class="empty">No User accounts found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
